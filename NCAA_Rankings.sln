@@ -1,0 +1,33 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 18
+VisualStudioVersion = 18.2.11408.102 d18.0
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "NCAA_Rankings", "NCAA_Rankings\NCAA_Rankings.csproj", "{8C52339A-534B-4977-B301-9228AAA8E32D}"
+EndProject
+Project("{00D1A9C2-B5F0-4AF3-8072-F6C62B433612}") = "NCAA_Database", "NCAA_Database\NCAA_Database.sqlproj", "{6459AF29-A23D-4510-AEE2-75F0CE1BA90A}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{8C52339A-534B-4977-B301-9228AAA8E32D}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{8C52339A-534B-4977-B301-9228AAA8E32D}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{8C52339A-534B-4977-B301-9228AAA8E32D}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{8C52339A-534B-4977-B301-9228AAA8E32D}.Release|Any CPU.Build.0 = Release|Any CPU
+		{6459AF29-A23D-4510-AEE2-75F0CE1BA90A}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{6459AF29-A23D-4510-AEE2-75F0CE1BA90A}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{6459AF29-A23D-4510-AEE2-75F0CE1BA90A}.Debug|Any CPU.Deploy.0 = Debug|Any CPU
+		{6459AF29-A23D-4510-AEE2-75F0CE1BA90A}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{6459AF29-A23D-4510-AEE2-75F0CE1BA90A}.Release|Any CPU.Build.0 = Release|Any CPU
+		{6459AF29-A23D-4510-AEE2-75F0CE1BA90A}.Release|Any CPU.Deploy.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {D9925AAB-4D42-45D8-91BA-BF16347D5628}
+	EndGlobalSection
+EndGlobal
