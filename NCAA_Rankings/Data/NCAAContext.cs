@@ -8,6 +8,7 @@ namespace NCAA_Rankings.Data
         public DbSet<Game> Games { get; set; }
         public DbSet<Team> Teams { get; set; }
         public DbSet<AvgScoreDelta> AvgScoreDeltas { get; set; }
+        public DbSet<TeamRecord> TeamRecords { get; set; }
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
@@ -97,6 +98,55 @@ namespace NCAA_Rankings.Data
                       .HasForeignKey(e => e.TeamID)
                       .HasConstraintName("FK_TeamRecords_Team");
 
+            });
+
+            // Game table mapping
+            modelBuilder.Entity<Game>(entity =>
+            {
+                entity.ToTable("Game");
+
+                // composite key: Year, Week, WinnerId, LoserId
+                entity.HasKey(e => new { e.Year, e.Week, e.WinnerId, e.LoserId });
+
+                entity.Property(e => e.Year)
+                      .HasColumnName("Year");
+
+                entity.Property(e => e.Week)
+                      .HasColumnName("Week");
+
+                entity.Property(e => e.Rank)
+                      .HasColumnName("Rank")
+                      .ValueGeneratedNever();
+
+                entity.Property(e => e.WinnerId)
+                      .HasColumnName("WinnerId")
+                      .IsRequired(); ;
+
+                entity.Property(e => e.WinnerName)
+                      .HasColumnName("WinnerName")
+                      .HasColumnType("varchar(50)")
+                      .IsRequired();
+
+                entity.Property(e => e.WPoints)
+                      .HasColumnName("WPoints");
+
+                entity.Property(e => e.LoserId)
+                      .HasColumnName("LoserId")
+                      .IsRequired(); ;
+
+                entity.Property(e => e.LoserName)
+                      .HasColumnName("LoserName")
+                      .HasColumnType("varchar(50)")
+                      .IsRequired();
+
+                entity.Property(e => e.LPoints)
+                      .HasColumnName("LPoints");
+
+                entity.Property(e => e.Location)
+                      .HasColumnName("Location");
+
+                // Spread is a computed CLR-only property; ensure EF doesn't attempt to map it.
+                entity.Ignore(e => e.Spread);
             });
 
 

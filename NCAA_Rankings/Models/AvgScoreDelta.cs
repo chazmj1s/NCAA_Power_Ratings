@@ -1,3 +1,4 @@
+using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
 
 namespace NCAA_Rankings.Models
@@ -5,14 +6,17 @@ namespace NCAA_Rankings.Models
     [Table("AvgScoreDeltas")]
     public class AvgScoreDelta
     {
-        // maps to tinyint (0..255) in SQL; SQL has constraints to limit to 0..20
+        // composite key configured in DbContext fluent API
+        [Column("Team1Wins", TypeName = "tinyint")]
         public byte Team1Wins { get; set; }
 
+        [Column("Team2Wins", TypeName = "tinyint")]
         public byte Team2Wins { get; set; }
 
-        [Column(TypeName = "decimal(5,4)")]
+        [Column("AverageScoreDelta", TypeName = "decimal(5,4)")]
         public decimal AverageScoreDelta { get; set; }
 
+        [Column("SampleSize")]
         public int? SampleSize { get; set; }
     }
 }

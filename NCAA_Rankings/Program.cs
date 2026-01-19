@@ -1,5 +1,7 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 using Microsoft.OpenApi;
+using NCAA_Rankings;
 using NCAA_Rankings.Data;
 using NCAA_Rankings.Interfaces;
 using NCAA_Rankings.Services;
@@ -9,6 +11,9 @@ var builder = WebApplication.CreateBuilder(args);
 
 // Add database context configuration
 builder.Services.AddDbContext<NCAAContext>(options =>
+    options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection")));
+// Use AddDbContextFactory for scenarios where you need to create contexts manually
+builder.Services.AddDbContextFactory<NCAAContext>(options =>
     options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection")));
 
 // Add services to the container.
@@ -20,6 +25,8 @@ builder.Services.AddSwaggerGen(c =>
 });
 
 builder.Services.AddScoped<IGameDataService, GameDataService>();
+
+builder.Services.Configure<CustomSettings>(builder.Configuration.GetSection("CustomSettings"));
 
 var app = builder.Build();
 

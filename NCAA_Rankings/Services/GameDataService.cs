@@ -1,26 +1,26 @@
 ﻿using HtmlAgilityPack;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Internal;
 using NCAA_Rankings.Data;
 using NCAA_Rankings.Interfaces;
 using NCAA_Rankings.Models;
+using NCAA_Rankings.Utilities;
+using System;
+using System.Configuration;
+using System.IO;
+using System.Runtime.CompilerServices;
 using System.Text.RegularExpressions;
-
 
 namespace NCAA_Rankings.Services
 {
-    public class GameDataService : IGameDataService
+    public class GameDataService(IDbContextFactory<NCAAContext> _contextFactory, RecordProcessor _recordProcessor, NCAAContext _context, IConfiguration _configuration) : IGameDataService
     {
-        private readonly NCAAContext _context;
-        public GameDataService(NCAAContext context)
-        {
-            _context = context;
-        }
-
-        public async Task<List<Game>> ExtractGameDataForYearsAsync(int? year)
+        public async Task<List<Game>> ExtractGameDataHistoryAsync(int? year)
         {
             var gameDataList = new List<Game>();
             using var httpClient = new HttpClient();
             var tasks = new List<Task<List<Game>>>();
-            var currentYear = DateTime.Now.Year;
+            var currentYear = DateTime.Now.Month < 8 ? DateTime.Now.Year - 1 : DateTime.Now.Year;
             var getYear = year ?? currentYear;
 
 
@@ -37,7 +37,7 @@ namespace NCAA_Rankings.Services
             {
                 gameDataList.AddRange(result);
             }
-            
+
             if (gameDataList.Count > 0)
             {
                 try
@@ -54,7 +54,7 @@ namespace NCAA_Rankings.Services
             return gameDataList;
         }
 
-        private static async Task<List<Game>> ExtractGameDataForSingleYearAsync(HttpClient httpClient, string url, int year)
+        private async Task<List<Game>> ExtractGameDataForSingleYearAsync(HttpClient httpClient, string url, int year)
         {
             var gameDataList = new List<Game>();
 
@@ -89,13 +89,26 @@ namespace NCAA_Rankings.Services
                     if (cells == null || cells.Count < 10)
                         continue;
 
+                    // Extract winnerName and loserName from the appropriate cells
+                    var winnerName = Regex.Replace(cells[4].InnerText, regex, "").Trim();
+                    var loserName = Regex.Replace(cells[7].InnerText, regex, "").Trim();
+
+                    int winnerId = _context.Teams.FirstOrDefault(t => t.TeamName == winnerName)?.TeamID ?? -1;
+                    int loserId = _context.Teams.FirstOrDefault(t => t.TeamName == loserName)?.TeamID ?? -1;
+
+                    var siteCellText = cells[6].InnerText.Trim();
+                    char siteIndicator = siteCellText.Contains('@') ? 'L' : siteCellText.Contains('N') ? 'N' : 'W';
+
                     var gameData = new Game
                     {
                         Rank = rank++,
                         Week = int.TryParse(cells[0].InnerText.Trim(), out int week) ? week : 0,
-                        Winner = Regex.Replace(cells[4].InnerText, regex, "").Trim(),
+                        WinnerId = winnerId,
+                        WinnerName = winnerName,
                         WPoints = int.TryParse(cells[5].InnerText.Trim(), out int wpoints) ? wpoints : 0,
-                        Loser = Regex.Replace(cells[7].InnerText, regex, "").Trim(),
+                        Location = siteIndicator,
+                        LoserId = loserId,
+                        LoserName = loserName,
                         LPoints = int.TryParse(cells[8].InnerText.Trim(), out int lpoints) ? lpoints : 0,
                         Year = year
                     };
@@ -148,5 +161,54 @@ namespace NCAA_Rankings.Services
 
             return updatedData;
         }
+
+        public async Task<int> LoadGameHistoryFromFiles()
+        {
+            // Retrieve the file path from configuration
+            var dataDirectory = _configuration.GetValue<string>("CustomSettings:FilePath", "NCAA Raw Game Data");
+
+            return await ProcessDirectoryAsync(dataDirectory);
+        }
+
+        public async Task<int> ProcessDirectoryAsync(string directoryPath)
+        {
+            Console.WriteLine($"Starting processing in {directoryPath}...");
+            var tokenSource = new CancellationTokenSource();
+            //var recordProcessor = new RecordProcessor(); // Your processing logic class
+            var recordsProcessed = 0;
+
+            // Use Parallel.ForEachAsync for efficient parallel processing of records
+            await Parallel.ForEachAsync(
+                ReadRecordsAsync(directoryPath, tokenSource.Token), // The async stream of records
+                tokenSource.Token, // Cancellation token
+                async (recordFields, token) =>
+                {
+                    await _recordProcessor.ProcessSingleRecordAsync(recordFields, Path.GetFileNameWithoutExtension(directoryPath), _contextFactory, token);
+                    recordsProcessed++;
+                }
+            );
+
+            return recordsProcessed;
+        }
+
+        public async IAsyncEnumerable<string[]> ReadRecordsAsync(string directoryPath, [EnumeratorCancellation] CancellationToken token)
+        {
+            // Get all CSV files in the directory
+            foreach (var filePath in Directory.EnumerateFiles(directoryPath, "*.txt"))
+            {
+                await foreach (var line in File.ReadLinesAsync(filePath, token))
+                {
+                    // Skip empty lines or headers if necessary
+                    if (string.IsNullOrWhiteSpace(line) || line[0].Equals("Rk")) continue;
+
+                    // Split the line by comma, trim whitespace from fields
+                    var fields = line.Split(',')
+                                     .Select(field => field.Trim())
+                                     .ToArray();
+                    yield return fields; // Yield the record (fields array)
+                }
+            }
+        }
+
     }
 }
