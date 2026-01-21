@@ -13,7 +13,7 @@ using System.Text.RegularExpressions;
 
 namespace NCAA_Rankings.Services
 {
-    public class GameDataService(IDbContextFactory<NCAAContext> _contextFactory, RecordProcessor _recordProcessor, NCAAContext _context, IConfiguration _configuration) : IGameDataService
+    public class GameDataService(IDbContextFactory<NCAAContext> _contextFactory, RecordProcessor _recordProcessor, IConfiguration _configuration) : IGameDataService
     {
         public async Task<List<Game>> ExtractGameDataHistoryAsync(int? year)
         {
@@ -23,12 +23,12 @@ namespace NCAA_Rankings.Services
             var currentYear = DateTime.Now.Month < 8 ? DateTime.Now.Year - 1 : DateTime.Now.Year;
             var getYear = year ?? currentYear;
 
-
+            await using var context = _contextFactory.CreateDbContext();
 
             while (getYear <= currentYear)
             {
                 string url = $"https://www.sports-reference.com/cfb/years/{getYear}-schedule.html";
-                tasks.Add(ExtractGameDataForSingleYearAsync(httpClient, url, getYear));
+                tasks.Add(ExtractGameDataForSingleYearAsync(httpClient, url, context, getYear));
                 getYear++;
             }
 
@@ -42,8 +42,8 @@ namespace NCAA_Rankings.Services
             {
                 try
                 {
-                    await _context.Games.AddRangeAsync(gameDataList);
-                    await _context.SaveChangesAsync();
+                    await context.Games.AddRangeAsync(gameDataList);
+                    await context.SaveChangesAsync();
                 }
                 catch (Exception ex)
                 {
@@ -54,7 +54,7 @@ namespace NCAA_Rankings.Services
             return gameDataList;
         }
 
-        private async Task<List<Game>> ExtractGameDataForSingleYearAsync(HttpClient httpClient, string url, int year)
+        private static async Task<List<Game>> ExtractGameDataForSingleYearAsync(HttpClient httpClient, string url, NCAAContext context, int year)
         {
             var gameDataList = new List<Game>();
 
@@ -78,7 +78,6 @@ namespace NCAA_Rankings.Services
                     return gameDataList;
                 }
 
-                var rank = 1;
                 var regex = @"\(\d+\)&nbsp;";
                 foreach (var row in rows)
                 {
@@ -93,15 +92,14 @@ namespace NCAA_Rankings.Services
                     var winnerName = Regex.Replace(cells[4].InnerText, regex, "").Trim();
                     var loserName = Regex.Replace(cells[7].InnerText, regex, "").Trim();
 
-                    int winnerId = _context.Teams.FirstOrDefault(t => t.TeamName == winnerName)?.TeamID ?? -1;
-                    int loserId = _context.Teams.FirstOrDefault(t => t.TeamName == loserName)?.TeamID ?? -1;
+                    int winnerId = context.Teams.FirstOrDefault(t => t.TeamName == winnerName)?.TeamID ?? -1;
+                    int loserId = context.Teams.FirstOrDefault(t => t.TeamName == loserName)?.TeamID ?? -1;
 
                     var siteCellText = cells[6].InnerText.Trim();
                     char siteIndicator = siteCellText.Contains('@') ? 'L' : siteCellText.Contains('N') ? 'N' : 'W';
 
                     var gameData = new Game
                     {
-                        Rank = rank++,
                         Week = int.TryParse(cells[0].InnerText.Trim(), out int week) ? week : 0,
                         WinnerId = winnerId,
                         WinnerName = winnerName,
@@ -126,38 +124,39 @@ namespace NCAA_Rankings.Services
 
         public async Task<List<Game>> UpdateGameDataForYearAndWeekAsync(List<Game> existingData, int year, int week)
         {
-            string url = $"https://www.sports-reference.com/cfb/years/{year}-schedule.html";
-            using var httpClient = new HttpClient();
+            //string url = $"https://www.sports-reference.com/cfb/years/{year}-schedule.html";
+            //using var httpClient = new HttpClient();
             var updatedData = new List<Game>(existingData);
+            //await using var context = _contextFactory.CreateDbContext();
 
-            try
-            {
-                // Fetch new data for the specified year
-                var newData = await ExtractGameDataForSingleYearAsync(httpClient, url, year);
+            //try
+            //{
+            //    // Fetch new data for the specified year
+            //    var newData = await ExtractGameDataForSingleYearAsync(httpClient, url, context, year);
 
-                // Remove existing games for the specified year and week
-                updatedData.RemoveAll(game => game.Year == year && game.Week == week);
+            //    // Remove existing games for the specified year and week
+            //    updatedData.RemoveAll(game => game.Year == year && game.Week == week);
 
-                // Add new games for the specified year and week
-                var weekData = newData.FindAll(game => game.Week == week);
-                updatedData.AddRange(weekData);
+            //    // Add new games for the specified year and week
+            //    var weekData = newData.FindAll(game => game.Week == week);
+            //    updatedData.AddRange(weekData);
 
-                // Sort the data by year, week, and rank to maintain order
-                updatedData.Sort((a, b) =>
-                {
-                    int yearCompare = a.Year.CompareTo(b.Year);
-                    if (yearCompare != 0) return yearCompare;
-                    int weekCompare = a.Week.CompareTo(b.Week);
-                    if (weekCompare != 0) return weekCompare;
-                    return a.Rank.CompareTo(b.Rank);
-                });
+            //    // Sort the data by year, week, and rank to maintain order
+            //    updatedData.Sort((a, b) =>
+            //    {
+            //        int yearCompare = a.Year.CompareTo(b.Year);
+            //        if (yearCompare != 0) return yearCompare;
+            //        int weekCompare = a.Week.CompareTo(b.Week);
+            //        if (weekCompare != 0) return weekCompare;
+            //        return a.Rank.CompareTo(b.Rank);
+            //    });
 
-                Console.WriteLine($"Updated data for year {year}, week {week}. Added {weekData.Count} games.");
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Error updating data for year {year}, week {week}: {ex.Message}");
-            }
+            //    Console.WriteLine($"Updated data for year {year}, week {week}. Added {weekData.Count} games.");
+            //}
+            //catch (Exception ex)
+            //{
+            //    Console.WriteLine($"Error updating data for year {year}, week {week}: {ex.Message}");
+            //}
 
             return updatedData;
         }
@@ -176,14 +175,15 @@ namespace NCAA_Rankings.Services
             var tokenSource = new CancellationTokenSource();
             //var recordProcessor = new RecordProcessor(); // Your processing logic class
             var recordsProcessed = 0;
+            var yearIn = Path.GetFileNameWithoutExtension(directoryPath);
 
             // Use Parallel.ForEachAsync for efficient parallel processing of records
             await Parallel.ForEachAsync(
                 ReadRecordsAsync(directoryPath, tokenSource.Token), // The async stream of records
                 tokenSource.Token, // Cancellation token
-                async (recordFields, token) =>
+                async (recordInfo, token) =>
                 {
-                    await _recordProcessor.ProcessSingleRecordAsync(recordFields, Path.GetFileNameWithoutExtension(directoryPath), _contextFactory, token);
+                    await _recordProcessor.ProcessSingleRecordAsync(recordInfo.Fields, recordInfo.FileName, token);
                     recordsProcessed++;
                 }
             );
@@ -191,24 +191,109 @@ namespace NCAA_Rankings.Services
             return recordsProcessed;
         }
 
-        public async IAsyncEnumerable<string[]> ReadRecordsAsync(string directoryPath, [EnumeratorCancellation] CancellationToken token)
+        public async IAsyncEnumerable<FileRecord> ReadRecordsAsync(string directoryPath, [EnumeratorCancellation] CancellationToken token)
         {
             // Get all CSV files in the directory
             foreach (var filePath in Directory.EnumerateFiles(directoryPath, "*.txt"))
             {
+                string fileName = Path.GetFileNameWithoutExtension(filePath);
+
                 await foreach (var line in File.ReadLinesAsync(filePath, token))
                 {
                     // Skip empty lines or headers if necessary
-                    if (string.IsNullOrWhiteSpace(line) || line[0].Equals("Rk")) continue;
+                    if (string.IsNullOrEmpty(line) || line.Trim().StartsWith("Rk")) continue;
 
                     // Split the line by comma, trim whitespace from fields
                     var fields = line.Split(',')
                                      .Select(field => field.Trim())
                                      .ToArray();
-                    yield return fields; // Yield the record (fields array)
+
+                    yield return new FileRecord(fileName, fields); ; // Yield the record (fields array)
                 }
             }
         }
+
+        public async Task UpdateTeamRecordsAsync(int? targetYear = null, CancellationToken token = default)
+        {
+            // Use an asynchronous factory so the DbContext gets disposed asynchronously.
+            await using var context = await _contextFactory.CreateDbContextAsync(token);
+
+            // Project each game to two rows (winner and loser), group and aggregate — equivalent to the SQL WITH+UNION approach.
+            var query = context.Games
+                .Where(g => g.Year > 0);
+
+            if (targetYear.HasValue)
+            {
+                query = query.Where(g => g.Year == targetYear.Value);
+            }
+
+            var aggregated = await query
+                .SelectMany(g => new[]
+                {
+                new
+                {
+                    Year = g.Year,
+                    TeamId = g.WinnerId,
+                    TeamName = g.WinnerName,
+                    Wins = 1,
+                    Losses = 0,
+                    PointsFor = g.WPoints,
+                    PointsAgainst = g.LPoints
+                },
+                new
+                {
+                    Year = g.Year,
+                    TeamId = g.LoserId,
+                    TeamName = g.LoserName,
+                    Wins = 0,
+                    Losses = 1,
+                    PointsFor = g.LPoints,
+                    PointsAgainst = g.WPoints
+                }
+                })
+                .GroupBy(x => new { x.Year, x.TeamId, x.TeamName })
+                .Select(g => new TeamRecord
+                {
+                    TeamID = g.Key.TeamId,
+                    Year = (short)g.Key.Year,
+                    Wins = (byte)g.Sum(x => x.Wins),
+                    Losses = (byte)g.Sum(x => x.Losses),
+                    PointsFor = g.Sum(x => x.PointsFor),
+                    PointsAgainst = g.Sum(x => x.PointsAgainst)
+                })
+                .ToListAsync(token);
+
+            if (aggregated.Count == 0)
+                return;
+
+            // Load existing TeamRecords for affected years into memory for efficient upsert.
+            var years = aggregated.Select(a => a.Year).Distinct().ToList();
+            var existingRecords = await context.TeamRecords
+                .Where(tr => years.Contains(tr.Year))
+                .ToListAsync(token);
+
+            // Upsert: update existing records, add missing ones.
+            foreach (var rec in aggregated)
+            {
+                var exist = existingRecords.FirstOrDefault(e => e.TeamID == rec.TeamID && e.Year == rec.Year);
+                if (exist != null)
+                {
+                    exist.Wins = rec.Wins;
+                    exist.Losses = rec.Losses;
+                    exist.PointsFor = rec.PointsFor;
+                    exist.PointsAgainst = rec.PointsAgainst;
+                    // EF Core will track changes; no explicit Update required.
+                }
+                else
+                {
+                    // Avoid adding duplicates if another aggregated entry matches (shouldn't happen after grouping).
+                    context.TeamRecords.Add(rec);
+                }
+            }
+
+            await context.SaveChangesAsync(token);
+        }
+
 
     }
 }

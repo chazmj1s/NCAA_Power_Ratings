@@ -7,9 +7,8 @@ namespace NCAA_Rankings.Models
     public class Game
     {
         [Key]
-        [Column("Rank")]
-        [DatabaseGenerated(DatabaseGeneratedOption.None)]
-        public int Rank { get; set; }
+        [Column("Id")]
+        public int Id { get; set; }
 
         [Column("Year")]
         public int Year { get; set; }

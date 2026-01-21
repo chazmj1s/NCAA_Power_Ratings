@@ -37,6 +37,28 @@ namespace NCAA_Rankings.Data
                 entity.Property(e => e.SampleSize)
                       .HasColumnName("SampleSize");
 
+                // Team table mapping
+                modelBuilder.Entity<Team>(entity =>
+                {
+                    entity.ToTable("Team");
+
+                    // Primary key
+                    entity.HasKey(e => e.TeamID);
+
+                    entity.Property(e => e.TeamID)
+                          .HasColumnName("TeamID");
+
+                    entity.Property(e => e.Alias)
+                          .HasColumnName("Alias")
+                          .HasColumnType("varchar(50)");
+
+                    // TeamName column; adjust length or type if your DB differs
+                    entity.Property(e => e.TeamName)
+                          .HasColumnName("TeamName")
+                          .HasColumnType("varchar(50)")
+                          .IsRequired();
+                });
+
                 // add same check constraints as the DB to keep EF model aligned
             });
             modelBuilder.Entity<AvgScoreDelta>(entity =>
@@ -105,18 +127,16 @@ namespace NCAA_Rankings.Data
             {
                 entity.ToTable("Game");
 
-                // composite key: Year, Week, WinnerId, LoserId
-                entity.HasKey(e => new { e.Year, e.Week, e.WinnerId, e.LoserId });
+                entity.HasKey(e => new { e.Id });
+
+                entity.Property(e => e.Id)
+                      .HasColumnName("Id");
 
                 entity.Property(e => e.Year)
                       .HasColumnName("Year");
 
                 entity.Property(e => e.Week)
                       .HasColumnName("Week");
-
-                entity.Property(e => e.Rank)
-                      .HasColumnName("Rank")
-                      .ValueGeneratedNever();
 
                 entity.Property(e => e.WinnerId)
                       .HasColumnName("WinnerId")

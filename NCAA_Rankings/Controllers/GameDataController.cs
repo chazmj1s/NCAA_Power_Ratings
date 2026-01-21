@@ -7,8 +7,16 @@ namespace NCAA_Rankings.Controllers
 {
     [ApiController]
     [Route("api/[controller]")]
-    public class GameDataController(IGameDataService gameDataService, ILogger<GameDataController> logger) : ControllerBase
+    public class GameDataController : ControllerBase
     {
+        private readonly IGameDataService gameDataService;
+        private readonly ILogger<GameDataController> logger;
+
+        public GameDataController(IGameDataService gameDataService, ILogger<GameDataController> logger)
+        {
+            this.gameDataService = gameDataService;
+            this.logger = logger;
+        }
 
         /// <summary>
         /// Extract game data starting from the provided year up through the current year.
@@ -45,6 +53,26 @@ namespace NCAA_Rankings.Controllers
             {
                 logger.LogError(ex, "Error loading game data from files");
                 return StatusCode(500, "An error occurred while extracting game data.");
+            }
+        }
+
+        /// <summary>
+        /// Updates team records for the specified year and redirects to the home page.
+        /// Example: POST /api/gamedata/updateRecords?year=2021
+        /// </summary>
+        [HttpPost("updateRecords")]
+        public async Task<IActionResult> UpdateRecords([FromQuery] int? year)
+        {
+            try
+            {
+                // Call UpdateTeamRecordsAsync on the injected service
+                await gameDataService.UpdateTeamRecordsAsync(year);
+                return RedirectToAction("Index", "Home");
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "Error updating team records for year={Year}", year);
+                return StatusCode(500, "An error occurred while updating team records.");
             }
         }
     }

@@ -5,16 +5,23 @@ using NCAA_Rankings;
 using NCAA_Rankings.Data;
 using NCAA_Rankings.Interfaces;
 using NCAA_Rankings.Services;
+using NCAA_Rankings.Utilities;
 
 
 var builder = WebApplication.CreateBuilder(args);
 
 // Add database context configuration
-builder.Services.AddDbContext<NCAAContext>(options =>
-    options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection")));
-// Use AddDbContextFactory for scenarios where you need to create contexts manually
+// Program.cs - make options lifetime Singleton
+builder.Services.AddDbContext<NCAAContext>(
+    options => options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection")),
+    contextLifetime: ServiceLifetime.Scoped,
+    optionsLifetime: ServiceLifetime.Singleton);
+
 builder.Services.AddDbContextFactory<NCAAContext>(options =>
     options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection")));
+
+builder.Services.AddScoped<IGameDataService, GameDataService>();
+builder.Services.AddTransient<RecordProcessor>();
 
 // Add services to the container.
 builder.Services.AddControllersWithViews();
@@ -23,8 +30,6 @@ builder.Services.AddSwaggerGen(c =>
 {
     c.SwaggerDoc("v1", new OpenApiInfo { Title = "My API", Version = "v1" });
 });
-
-builder.Services.AddScoped<IGameDataService, GameDataService>();
 
 builder.Services.Configure<CustomSettings>(builder.Configuration.GetSection("CustomSettings"));
 
@@ -60,3 +65,4 @@ app.MapControllerRoute(
 
 
 app.Run();
+
