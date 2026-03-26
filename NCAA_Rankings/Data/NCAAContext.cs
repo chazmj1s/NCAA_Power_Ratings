@@ -19,7 +19,7 @@ namespace NCAA_Rankings.Data
                 entity.ToTable("AvgScoreDeltas");
 
                 // composite primary key
-                entity.HasKey(e => new { e.Team1Wins, e.Team2Wins });
+                entity.HasKey(e => new { e.Id });
 
                 // preserve SQL types and names
                 entity.Property(e => e.Team1Wins)
@@ -31,8 +31,10 @@ namespace NCAA_Rankings.Data
                       .HasColumnType("tinyint");
 
                 entity.Property(e => e.AverageScoreDelta)
-                      .HasColumnName("AverageScoreDelta")
-                      .HasColumnType("decimal(5,4)");
+                      .HasColumnName("AverageScoreDelta");
+
+                entity.Property(e => e.StDevP)
+                      .HasColumnName("StDevP");
 
                 entity.Property(e => e.SampleSize)
                       .HasColumnName("SampleSize");
@@ -49,14 +51,25 @@ namespace NCAA_Rankings.Data
                           .HasColumnName("TeamID");
 
                     entity.Property(e => e.Alias)
-                          .HasColumnName("Alias")
-                          .HasColumnType("varchar(50)");
+                          .HasColumnName("Alias");
 
                     // TeamName column; adjust length or type if your DB differs
                     entity.Property(e => e.TeamName)
                           .HasColumnName("TeamName")
-                          .HasColumnType("varchar(50)")
                           .IsRequired();
+
+                    // Add Division and Conference properties
+                    entity.Property(e => e.Division)
+                          .HasColumnName("Division")
+                          .HasColumnType("varchar(20)");
+
+                    entity.Property(e => e.Conference)
+                          .HasColumnName("Conference")
+                          .HasColumnType("varchar(50)");
+
+                    entity.Property(e => e.ConferenceAbbr)
+                          .HasColumnName("ConferenceAbbr")
+                          .HasColumnType("varchar(20)");
                 });
 
                 // add same check constraints as the DB to keep EF model aligned
@@ -65,7 +78,10 @@ namespace NCAA_Rankings.Data
             {
                 entity.ToTable("AvgScoreDeltas");
 
-                entity.HasKey(e => new { e.Team1Wins, e.Team2Wins });
+                entity.HasKey(e => new { e.Id });
+
+                entity.Property(e => e.Id)
+                      .HasColumnName("Id");
 
                 entity.Property(e => e.Team1Wins)
                       .HasColumnName("Team1Wins")
@@ -87,25 +103,24 @@ namespace NCAA_Rankings.Data
             {
                 entity.ToTable("TeamRecords");
 
-                // Primary key is TeamID per your SQL DDL
-                entity.HasKey(e => e.TeamID);
+                entity.HasKey(e => new { e.Id });
+
+                entity.Property(e => e.Id)
+                      .HasColumnName("Id");
 
                 entity.Property(e => e.TeamID)
                       .HasColumnName("TeamID");
 
                 entity.Property(e => e.Year)
                       .HasColumnName("Year")
-                      .HasColumnType("smallint")
                       .IsRequired();
 
                 entity.Property(e => e.Wins)
                       .HasColumnName("Wins")
-                      .HasColumnType("tinyint")
                       .IsRequired();
 
                 entity.Property(e => e.Losses)
                       .HasColumnName("Losses")
-                      .HasColumnType("tinyint")
                       .IsRequired();
 
                 entity.Property(e => e.PointsFor)
@@ -121,8 +136,6 @@ namespace NCAA_Rankings.Data
                       .HasConstraintName("FK_TeamRecords_Team");
 
             });
-
-            // Game table mapping
             modelBuilder.Entity<Game>(entity =>
             {
                 entity.ToTable("Game");
@@ -144,7 +157,6 @@ namespace NCAA_Rankings.Data
 
                 entity.Property(e => e.WinnerName)
                       .HasColumnName("WinnerName")
-                      .HasColumnType("varchar(50)")
                       .IsRequired();
 
                 entity.Property(e => e.WPoints)
@@ -156,7 +168,6 @@ namespace NCAA_Rankings.Data
 
                 entity.Property(e => e.LoserName)
                       .HasColumnName("LoserName")
-                      .HasColumnType("varchar(50)")
                       .IsRequired();
 
                 entity.Property(e => e.LPoints)

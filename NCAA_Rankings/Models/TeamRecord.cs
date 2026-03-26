@@ -6,12 +6,11 @@ namespace NCAA_Rankings.Models
     [Table("TeamRecords")]
     public class TeamRecord
     {
-        // kept for compatibility with existing code; not mapped to the database
-        [NotMapped]
+
+        [Key]
+        [Column("Id")]
         public int Id { get; set; }
 
-        // Primary key per DbContext configuration / SQL DDL
-        [Key]
         [Column("TeamID")]
         public int TeamID { get; set; }
 
@@ -25,12 +24,30 @@ namespace NCAA_Rankings.Models
         public byte Losses { get; set; }
 
         [Column("PointsFor")]
-        public int? PointsFor { get; set; }
+        public int PointsFor { get; set; }
 
         [Column("PointsAgainst")]
-        public int? PointsAgainst { get; set; }
+        public int PointsAgainst { get; set; }
+
+        [Column("BaseSOS", TypeName = "decimal(10,3)")]
+        public decimal? BaseSOS { get; set; }
+
+        [Column("SubSOS", TypeName = "decimal(10,3)")]
+        public decimal? SubSOS { get; set; }
+
+        [Column("CombinedSOS", TypeName = "decimal(10,4)")]
+        public decimal? CombinedSOS { get; set; }
 
         [ForeignKey("TeamID")]
         public Team? Team { get; set; }
+
+        [NotMapped]
+        public int RegularSeasonGames => Year switch
+        {
+            >= 2006 => 12,
+            >= 1980 => 11,
+            >= 1965 => 10,
+            _ => 12 // Default to current standard for years outside range
+        };
     }
 }

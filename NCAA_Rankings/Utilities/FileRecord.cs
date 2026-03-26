@@ -1,14 +1,8 @@
 ﻿namespace NCAA_Rankings.Utilities
 {
-    public class FileRecord
+    public class FileRecord(string value, string[] strings)
     {
-        public FileRecord(string value, string[] strings)
-        {
-            FileName = value;
-            Fields = strings;
-        }
-
-        public  string FileName { get; set; }
-        public  string[] Fields { get; set; }
+        public string FileName { get; set; } = value;
+        public string[] Fields { get; set; } = strings;
     }
 }

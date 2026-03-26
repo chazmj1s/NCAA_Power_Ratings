@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Options;
 using Microsoft.OpenApi;
 using NCAA_Rankings;
 using NCAA_Rankings.Data;
@@ -13,15 +14,22 @@ var builder = WebApplication.CreateBuilder(args);
 // Add database context configuration
 // Program.cs - make options lifetime Singleton
 builder.Services.AddDbContext<NCAAContext>(
-    options => options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection")),
+options => options.UseSqlite(builder.Configuration.GetConnectionString("DefaultConnection"))
+                      .EnableSensitiveDataLogging(),
     contextLifetime: ServiceLifetime.Scoped,
     optionsLifetime: ServiceLifetime.Singleton);
 
 builder.Services.AddDbContextFactory<NCAAContext>(options =>
-    options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection")));
+options.UseSqlite(builder.Configuration.GetConnectionString("DefaultConnection"))
+           .EnableSensitiveDataLogging());
+
+// Register HttpClient for dependency injection
+builder.Services.AddHttpClient();
 
 builder.Services.AddScoped<IGameDataService, GameDataService>();
 builder.Services.AddTransient<RecordProcessor>();
+builder.Services.AddTransient<ScoreDeltaCalculator>();
+builder.Services.AddTransient<TeamMetricsService>();
 
 // Add services to the container.
 builder.Services.AddControllersWithViews();
@@ -29,6 +37,12 @@ builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen(c =>
 {
     c.SwaggerDoc("v1", new OpenApiInfo { Title = "My API", Version = "v1" });
+});
+
+builder.Services.AddLogging(loggingBuilder => {
+    loggingBuilder.AddConsole()
+        .AddFilter(DbLoggerCategory.Database.Command.Name, LogLevel.Information);
+    loggingBuilder.AddDebug();
 });
 
 builder.Services.Configure<CustomSettings>(builder.Configuration.GetSection("CustomSettings"));

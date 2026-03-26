@@ -15,6 +15,15 @@ namespace NCAA_Rankings.Models
         public required string TeamName { get; set; }
 
         [Column("Alias", TypeName = "varchar(50)")]
-        public required string? Alias { get; set; }
+        public string? Alias { get; set; }
+
+        [Column("Division", TypeName = "varchar(20)")]
+        public string? Division { get; set; }
+
+        [Column("Conference", TypeName = "varchar(50)")]
+        public string? Conference { get; set; }
+
+        [Column("ConferenceAbbr", TypeName = "varchar(10)")]
+        public string? ConferenceAbbr { get; set; }
     }
 }
