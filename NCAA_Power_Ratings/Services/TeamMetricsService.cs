@@ -1,4 +1,6 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
+using NCAA_Power_Ratings.Configuration;
 using NCAA_Power_Ratings.Data;
 using NCAA_Power_Ratings.Interfaces;
 using System;
@@ -15,10 +17,14 @@ namespace NCAA_Power_Ratings.Services
     public class TeamMetricsService
     {
         private readonly IDbContextFactory<NCAAContext> _contextFactory;
+        private readonly MetricsConfiguration _config;
 
-        public TeamMetricsService(IDbContextFactory<NCAAContext> contextFactory)
+        public TeamMetricsService(
+            IDbContextFactory<NCAAContext> contextFactory,
+            IOptions<MetricsConfiguration> config)
         {
             _contextFactory = contextFactory;
+            _config = config.Value;
         }
 
         /// <summary>
@@ -27,9 +33,9 @@ namespace NCAA_Power_Ratings.Services
         /// </summary>
         private async Task<Dictionary<int, int>> CalculateProjectedWins(NCAAContext context, int endYear, CancellationToken token = default)
         {
-            var standardSeasonGames = 12;
-            const double extraWinBump = 0.25;
-            var startYear = endYear - 10;
+            var standardSeasonGames = _config.StandardSeasonGames;
+            var extraWinBump = _config.ExtraWinBump;
+            var startYear = endYear - _config.ProjectedWinsHistoryYears;
 
             // Get team records from last 10 years (excluding endYear)
             var teamRecords = await context.TeamRecords
@@ -82,7 +88,7 @@ namespace NCAA_Power_Ratings.Services
 
                     // Calculate projected wins
                     double projectedWinsDecimal = weightedAverage * standardSeasonGames;
-                    int projectedWinsValue = projectedWinsDecimal - Math.Floor(projectedWinsDecimal) >= 0.75
+                    int projectedWinsValue = projectedWinsDecimal - Math.Floor(projectedWinsDecimal) >= _config.ProjectedWinsRoundingThreshold
                         ? (int)Math.Ceiling(projectedWinsDecimal)
                         : (int)Math.Floor(projectedWinsDecimal);
 
@@ -232,11 +238,11 @@ namespace NCAA_Power_Ratings.Services
                 }
                 else
                 {
-                    if (targetWeek < 6)
+                    if (targetWeek < _config.SosWeekThreshold)
                         return;
                     else
                     {
-                        // Week 6+ - use current year wins
+                        // Week threshold or later - use current year wins
                         winsLookup = await context.TeamRecords
                             .Where(tr => tr.Year == targetYear)
                             .ToDictionaryAsync(tr => tr.TeamID, tr => (int)tr.Wins, token);
@@ -255,7 +261,9 @@ namespace NCAA_Power_Ratings.Services
                         OpponentId = g.LoserId,
                         OpponentName = g.LoserName,
                         TeamPoints = g.WPoints,
-                        OpponentPoints = g.LPoints
+                        OpponentPoints = g.LPoints,
+                        g.Location,
+                        IsHomeTeam = g.Location == 'W'
                     });
 
                 var gamesFromLoser = context.Games
@@ -268,7 +276,9 @@ namespace NCAA_Power_Ratings.Services
                         OpponentId = g.WinnerId,
                         OpponentName = g.WinnerName,
                         TeamPoints = g.LPoints,
-                        OpponentPoints = g.WPoints
+                        OpponentPoints = g.WPoints,
+                        g.Location,
+                        IsHomeTeam = g.Location == 'L'
                     });
 
                 var gameParticipants = await gamesFromWinner
@@ -287,11 +297,14 @@ namespace NCAA_Power_Ratings.Services
                         gp.OpponentName,
                         gp.TeamPoints,
                         gp.OpponentPoints,
-                        OpponentWins = winsLookup.GetValueOrDefault(gp.OpponentId, 0)
+                        OpponentWins = winsLookup.GetValueOrDefault(gp.OpponentId, 0),
+                        gp.Location,
+                        gp.IsHomeTeam
                     })
                     .ToList();
 
                 // Step 4: Join with AvgScoreDeltas and calculate Z-values
+                var homeFieldAdvantage = _config.HomeFieldAdvantage;
                 var avgScoreDeltas = await context.AvgScoreDeltas.ToListAsync(token);
 
                 var withDeltas = withRecords
@@ -307,7 +320,22 @@ namespace NCAA_Power_Ratings.Services
                         double zValue = 0.0;
                         if (asd != null && asd.StDevP != 0)
                         {
-                            zValue = ((double)delta - asd.AverageScoreDelta) / (double)asd.StDevP;
+                            // Expected delta is from higher-win team's perspective
+                            var expectedDelta = (double)asd.AverageScoreDelta;
+
+                            // Adjust to team's perspective
+                            var expectedFromTeamPerspective = r.TeamWins >= r.OpponentWins
+                                ? expectedDelta
+                                : -expectedDelta;
+
+                            // Adjust for home field advantage
+                            if (r.IsHomeTeam)
+                                expectedFromTeamPerspective += homeFieldAdvantage;
+                            else if (r.Location != 'N') // opponent is home
+                                expectedFromTeamPerspective -= homeFieldAdvantage;
+                            // else: neutral site, no adjustment
+
+                            zValue = (delta - expectedFromTeamPerspective) / (double)asd.StDevP;
                         }
 
                         return new
@@ -458,7 +486,9 @@ namespace NCAA_Power_Ratings.Services
                     TeamName = g.WinnerName,
                     OpponentId = g.LoserId,
                     TeamPoints = g.WPoints,
-                    OpponentPoints = g.LPoints
+                    OpponentPoints = g.LPoints,
+                    g.Location,
+                    IsHomeTeam = g.Location == 'W'
                 });
 
             var gamesFromLoser = context.Games
@@ -469,7 +499,9 @@ namespace NCAA_Power_Ratings.Services
                     TeamName = g.LoserName,
                     OpponentId = g.WinnerId,
                     TeamPoints = g.LPoints,
-                    OpponentPoints = g.WPoints
+                    OpponentPoints = g.WPoints,
+                    g.Location,
+                    IsHomeTeam = g.Location == 'L'
                 });
 
             var gameParticipants = await gamesFromWinner
@@ -486,6 +518,8 @@ namespace NCAA_Power_Ratings.Services
             var avgScoreDeltas = await context.AvgScoreDeltas.ToListAsync(token);
 
             // Step 4: Calculate Z-score per game per team
+            var homeFieldAdvantage = _config.HomeFieldAdvantage;
+
             var zScores = gameParticipants
                 .Select(gp => {
                     var teamWins = winsLookup.GetValueOrDefault(gp.TeamId, 0);
@@ -494,16 +528,33 @@ namespace NCAA_Power_Ratings.Services
                     var minWins = Math.Min(teamWins, oppWins);
 
                     var delta = gp.TeamPoints - gp.OpponentPoints;
-                    // Normalize delta direction — always from the higher-win team's perspective
-                    var normalizedDelta = teamWins >= oppWins ? delta : -delta;
 
                     var asd = avgScoreDeltas.FirstOrDefault(
                         a => a.Team1Wins == maxWins && a.Team2Wins == minWins);
 
                     double zScore = 0.0;
                     if (asd != null && asd.StDevP != 0)
-                        zScore = ((double)normalizedDelta - (double)asd.AverageScoreDelta)
-                                 / (double)asd.StDevP;
+                    {
+                        // Expected delta is always from higher-win team's perspective
+                        var expectedDelta = (double)asd.AverageScoreDelta;
+
+                        // Adjust expected to team's perspective:
+                        // - If team is favored (more wins): expect positive delta
+                        // - If team is underdog (fewer wins): expect negative delta
+                        var expectedFromTeamPerspective = teamWins >= oppWins 
+                            ? expectedDelta 
+                            : -expectedDelta;
+
+                        // Adjust for home field advantage
+                        if (gp.IsHomeTeam)
+                            expectedFromTeamPerspective += homeFieldAdvantage;
+                        else if (gp.Location != 'N') // opponent is home
+                            expectedFromTeamPerspective -= homeFieldAdvantage;
+                        // else: neutral site, no adjustment
+
+                        // Z-score: how much better/worse than expected
+                        zScore = (delta - expectedFromTeamPerspective) / (double)asd.StDevP;
+                    }
 
                     return new { gp.TeamId, ZScore = zScore };
                 })

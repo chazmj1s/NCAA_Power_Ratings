@@ -52,7 +52,7 @@ namespace NCAA_Power_Ratings.Utilities
                     {
                         Team1Wins = g.Key.W1,
                         Team2Wins = g.Key.W2,
-                        AvgDelta = Math.Round(deltas.Average(), 0),
+                        AvgDelta = Math.Round(deltas.Average(), 2),
                         StdDevP = CalculateStandardDeviationPopulation(deltas),
                         SampleSize = g.Count()
                     };
@@ -95,7 +95,8 @@ namespace NCAA_Power_Ratings.Utilities
 
                 if (existingRecord != null)
                 {
-                    existingRecord.AverageScoreDelta = (byte)Math.Round((stat.AvgDelta)); // adjust scale if needed
+                    existingRecord.AverageScoreDelta = (decimal)Math.Round(stat.AvgDelta, 2);
+                    existingRecord.StDevP = (decimal)Math.Round(stat.StdDevP, 8);
                     existingRecord.SampleSize = stat.SampleSize;
                 }
                 else
@@ -104,7 +105,7 @@ namespace NCAA_Power_Ratings.Utilities
                     {
                         Team1Wins = stat.Team1Wins,
                         Team2Wins = stat.Team2Wins,
-                        AverageScoreDelta = (byte)Math.Max(0, Math.Min(255, stat.AvgDelta)),
+                        AverageScoreDelta = (decimal)Math.Round(stat.AvgDelta, 2),
                         StDevP = (decimal)Math.Round(stat.StdDevP, 8),
                         SampleSize = stat.SampleSize
                     });

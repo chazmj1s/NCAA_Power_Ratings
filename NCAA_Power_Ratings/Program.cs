@@ -3,6 +3,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Options;
 using Microsoft.OpenApi;
 using NCAA_Power_Ratings;
+using NCAA_Power_Ratings.Configuration;
 using NCAA_Power_Ratings.Data;
 using NCAA_Power_Ratings.Interfaces;
 using NCAA_Power_Ratings.Services;
@@ -46,6 +47,7 @@ builder.Services.AddLogging(loggingBuilder => {
 });
 
 builder.Services.Configure<CustomSettings>(builder.Configuration.GetSection("CustomSettings"));
+builder.Services.Configure<MetricsConfiguration>(builder.Configuration.GetSection("MetricsConfiguration"));
 
 var app = builder.Build();
 
