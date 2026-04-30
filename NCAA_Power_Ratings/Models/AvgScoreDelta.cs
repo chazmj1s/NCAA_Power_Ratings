@@ -17,7 +17,7 @@ namespace NCAA_Power_Ratings.Models
         public byte Team2Wins { get; set; }
 
         [Column("AverageScoreDelta", TypeName = "decimal(6,2)")]
-        public byte AverageScoreDelta { get; set; }
+        public decimal AverageScoreDelta { get; set; }
 
         [Column("StDevP", TypeName = "decimal(10,8)")]
         public decimal StDevP { get; set; }
