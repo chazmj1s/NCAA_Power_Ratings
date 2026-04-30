@@ -1016,23 +1016,22 @@ namespace NCAA_Power_Ratings.Controllers
         }
 
         /// <summary>
-        /// Calculates and populates matchup-specific historical statistics for rivalry detection.
-        /// Analyzes all team pairings with sufficient game history to identify high-variance matchups.
-        /// Example: POST /api/gamedata/calculateMatchupHistories?minimumGames=10
+        /// Calculates and populates matchup-specific historical statistics for all 50 curated rivalries.
+        /// Processes Epic, National, State, and MEH tier rivalries from the seed data.
+        /// Example: POST /api/gamedata/calculateMatchupHistories
         /// </summary>
         [HttpPost("calculateMatchupHistories")]
-        public async Task<IActionResult> CalculateMatchupHistories([FromQuery] int? minimumGames)
+        public async Task<IActionResult> CalculateMatchupHistories()
         {
             try
             {
-                var minGames = minimumGames ?? _config.MinimumMatchupGames;
-                var count = await matchupHistoryCalculator.CalculateAllMatchupHistories(minGames);
+                var count = await matchupHistoryCalculator.CalculateAllMatchupHistories();
 
                 return Ok(new
                 {
                     message = "Matchup histories calculated successfully",
                     matchupsCreated = count,
-                    minimumGames = minGames,
+                    rivalriesProcessed = 50,
                     nextStep = "Matchup-specific variance will now be used in power rating calculations"
                 });
             }

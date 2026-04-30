@@ -23,14 +23,19 @@ namespace NCAA_Power_Ratings.Utilities
         }
 
         /// <summary>
-        /// Calculates matchup history for all team pairings in the database.
-        /// Only includes matchups with a minimum number of games for statistical significance.
+        /// Calculates matchup history for all 50 curated Epic, National, State, and MEH tier rivalries.
+        /// All rivalries in the seed data have sufficient game history (50+ games).
         /// </summary>
-        public async Task<int> CalculateAllMatchupHistories(int minimumGames = 10, CancellationToken cancellationToken = default)
+        public async Task<int> CalculateAllMatchupHistories(CancellationToken cancellationToken = default)
         {
             await using var context = await contextFactory.CreateDbContextAsync(cancellationToken);
 
-            logger.LogInformation("Starting matchup history calculation with minimum {MinGames} games", minimumGames);
+            logger.LogInformation("Starting matchup history calculation for all rivalry tiers");
+
+            // Get all rivalry metadata (Epic, National, State, and MEH tiers)
+            var rivalryMetadata = RivalrySeedData.GetRivalries();
+
+            logger.LogInformation("Found {Count} rivalries to process", rivalryMetadata.Count);
 
             // Get all games
             var allGames = await context.Games
@@ -45,21 +50,48 @@ namespace NCAA_Power_Ratings.Utilities
                 })
                 .ToListAsync(cancellationToken);
 
-            // Group by matchup
-            var matchupGroups = allGames
-                .GroupBy(x => new { x.Team1, x.Team2 })
-                .Where(g => g.Count() >= minimumGames)
-                .ToList();
+            // Get team name to ID mapping (include alias for matching)
+            var teamMapping = await context.Teams
+                .Select(t => new { t.TeamID, t.TeamName, t.Alias })
+                .ToListAsync(cancellationToken);
 
-            logger.LogInformation("Found {Count} matchups with at least {MinGames} games", matchupGroups.Count, minimumGames);
-
-            // Calculate statistics for each matchup
             var matchupHistories = new List<MatchupHistory>();
-            var rivalryMetadata = RivalrySeedData.GetRivalries();
 
-            foreach (var group in matchupGroups)
+            // Process each rivalry
+            foreach (var rivalry in rivalryMetadata)
             {
-                var games = group.ToList();
+                // Find team IDs for this rivalry (check both TeamName and Alias)
+                var team1Id = teamMapping.FirstOrDefault(t => 
+                    t.TeamName.Equals(rivalry.Team1Name, StringComparison.OrdinalIgnoreCase) ||
+                    (t.Alias != null && t.Alias.Equals(rivalry.Team1Name, StringComparison.OrdinalIgnoreCase)))?.TeamID;
+
+                var team2Id = teamMapping.FirstOrDefault(t => 
+                    t.TeamName.Equals(rivalry.Team2Name, StringComparison.OrdinalIgnoreCase) ||
+                    (t.Alias != null && t.Alias.Equals(rivalry.Team2Name, StringComparison.OrdinalIgnoreCase)))?.TeamID;
+
+                if (team1Id == null || team2Id == null)
+                {
+                    logger.LogWarning("Could not find team IDs for rivalry {RivalryName} ({Team1} vs {Team2})",
+                        rivalry.RivalryName, rivalry.Team1Name, rivalry.Team2Name);
+                    continue;
+                }
+
+                // Normalize team IDs so lower ID is always Team1
+                var normalizedTeam1 = Math.Min(team1Id.Value, team2Id.Value);
+                var normalizedTeam2 = Math.Max(team1Id.Value, team2Id.Value);
+
+                // Get games for this matchup
+                var games = allGames
+                    .Where(g => g.Team1 == normalizedTeam1 && g.Team2 == normalizedTeam2)
+                    .ToList();
+
+                if (games.Count == 0)
+                {
+                    logger.LogWarning("No games found for rivalry {RivalryName} ({Team1} vs {Team2})",
+                        rivalry.RivalryName, rivalry.Team1Name, rivalry.Team2Name);
+                    continue;
+                }
+
                 var gameCount = games.Count;
 
                 // Calculate average margin (absolute value)
@@ -73,33 +105,18 @@ namespace NCAA_Power_Ratings.Utilities
                 // Calculate upset rate (need to get win records for each game)
                 var upsets = await CalculateUpsetRate(context, games, cancellationToken);
 
-                // Check if this is a known rivalry by looking up team names
-                var team1Name = await context.Teams
-                    .Where(t => t.TeamID == group.Key.Team1)
-                    .Select(t => t.TeamName)
-                    .FirstOrDefaultAsync(cancellationToken) ?? "";
-
-                var team2Name = await context.Teams
-                    .Where(t => t.TeamID == group.Key.Team2)
-                    .Select(t => t.TeamName)
-                    .FirstOrDefaultAsync(cancellationToken) ?? "";
-
-                var rivalry = rivalryMetadata.FirstOrDefault(r =>
-                    (r.Team1Name.Equals(team1Name, StringComparison.OrdinalIgnoreCase) && r.Team2Name.Equals(team2Name, StringComparison.OrdinalIgnoreCase)) ||
-                    (r.Team1Name.Equals(team2Name, StringComparison.OrdinalIgnoreCase) && r.Team2Name.Equals(team1Name, StringComparison.OrdinalIgnoreCase)));
-
                 var history = new MatchupHistory
                 {
-                    Team1Id = group.Key.Team1,
-                    Team2Id = group.Key.Team2,
+                    Team1Id = normalizedTeam1,
+                    Team2Id = normalizedTeam2,
                     GamesPlayed = gameCount,
                     AvgMargin = (decimal)avgMargin,
                     StDevMargin = (decimal)stDev,
                     UpsetRate = (decimal)upsets,
                     FirstPlayed = games.Min(g => g.Year),
                     LastPlayed = games.Max(g => g.Year),
-                    RivalryName = rivalry?.RivalryName,
-                    RivalryTier = rivalry?.Tier
+                    RivalryName = rivalry.RivalryName,
+                    RivalryTier = rivalry.Tier
                 };
 
                 matchupHistories.Add(history);
