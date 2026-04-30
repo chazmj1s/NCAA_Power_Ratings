@@ -130,7 +130,7 @@ namespace NCAA_Power_Ratings.Controllers
             try
             {
                 await teamMetrics.SetSOS(year, week);
-                return Ok(new { message = $"SOS values calculated successfully for year {year ?? DateTime.Now.Year} and week {{ week ?? 0}}\r\n" });
+                return Ok(new { message = $"SOS values calculated successfully for year {year ?? DateTime.Now.Year} and week { week ?? 0}\r\n" });
             }
             catch (Exception ex)
             {
