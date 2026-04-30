@@ -83,6 +83,7 @@ namespace NCAA_Power_Ratings.Controllers
             try
             {
                 var gamesProcessed = await gameDataService.UpdateGameDataForYearAndWeekAsync(year, week);
+                await teamMetrics.SetSOS(year, week);  // auto-recalc SOS
                 return Ok(new 
                 { 
                     message = $"Successfully processed games for {year} week {week}",
@@ -124,12 +125,12 @@ namespace NCAA_Power_Ratings.Controllers
         /// Example: POST /api/gamedata/setSOS?year=2024
         /// </summary>
         [HttpPost("setSOS")]
-        public async Task<IActionResult> SetSOS([FromQuery] int? year)
+        public async Task<IActionResult> SetSOS([FromQuery] int? year, [FromQuery] int? week)
         {
             try
             {
-                await teamMetrics.SetSOS(year);
-                return Ok(new { message = $"SOS values calculated successfully for year {year ?? DateTime.Now.Year}" });
+                await teamMetrics.SetSOS(year, week);
+                return Ok(new { message = $"SOS values calculated successfully for year {year ?? DateTime.Now.Year} and week { week ?? 0}\r\n" });
             }
             catch (Exception ex)
             {
