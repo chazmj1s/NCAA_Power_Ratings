@@ -38,6 +38,9 @@ namespace NCAA_Power_Ratings.Models
         [Column("CombinedSOS", TypeName = "decimal(10,4)")]
         public decimal? CombinedSOS { get; set; }
 
+        [Column("PowerRating", TypeName = "decimal(10,4)")]
+        public decimal? PowerRating { get; set; }
+
         [ForeignKey("TeamID")]
         public Team? Team { get; set; }
 
