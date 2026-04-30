@@ -1,0 +1,25 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 18
+VisualStudioVersion = 18.2.11408.102
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "NCAA_Power_Ratings", "NCAA_Power_Ratings\NCAA_Power_Ratings.csproj", "{51BCA747-4CF1-A12B-A505-68C256C9F7CA}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{51BCA747-4CF1-A12B-A505-68C256C9F7CA}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{51BCA747-4CF1-A12B-A505-68C256C9F7CA}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{51BCA747-4CF1-A12B-A505-68C256C9F7CA}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{51BCA747-4CF1-A12B-A505-68C256C9F7CA}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {D9925AAB-4D42-45D8-91BA-BF16347D5628}
+	EndGlobalSection
+EndGlobal
