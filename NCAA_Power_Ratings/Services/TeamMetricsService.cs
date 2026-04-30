@@ -22,6 +22,78 @@ namespace NCAA_Power_Ratings.Services
         }
 
         /// <summary>
+        /// Calculates projected wins for all teams based on 10-year historical data.
+        /// Uses weighted average (recent years weighted more) and normalizes for season length.
+        /// </summary>
+        private async Task<Dictionary<int, int>> CalculateProjectedWins(NCAAContext context, int endYear, CancellationToken token = default)
+        {
+            var standardSeasonGames = 12;
+            const double extraWinBump = 0.25;
+            var startYear = endYear - 10;
+
+            // Get team records from last 10 years (excluding endYear)
+            var teamRecords = await context.TeamRecords
+                .Where(tr => tr.Year >= startYear && tr.Year < endYear)
+                .ToListAsync(token);
+
+            // Group by team and calculate projected wins
+            var projectedWins = teamRecords
+                .GroupBy(tr => tr.TeamID)
+                .Select(g =>
+                {
+                    // Order by year ascending (oldest to newest), take last 10
+                    var records = g.OrderBy(r => r.Year).TakeLast(10).ToList();
+
+                    // Calculate normalized win percentage for each year
+                    var normalizedPercentages = records.Select(r =>
+                    {
+                        standardSeasonGames = r.RegularSeasonGames;
+
+                        int totalGames = r.Wins + r.Losses;
+                        if (totalGames <= 0)
+                            return 0.0;
+
+                        double normalized;
+                        if (totalGames <= standardSeasonGames)
+                        {
+                            normalized = (double)r.Wins / totalGames;
+                        }
+                        else
+                        {
+                            int baseWins = Math.Min(r.Wins, standardSeasonGames);
+                            int extraWins = Math.Max(0, r.Wins - standardSeasonGames);
+                            normalized = (baseWins + (extraWins * extraWinBump)) / standardSeasonGames;
+                        }
+
+                        return normalized;
+                    }).ToList();
+
+                    // Calculate weighted average (most recent year = highest weight)
+                    double weightedAverage = 0.0;
+                    if (normalizedPercentages.Count > 0)
+                    {
+                        int n = normalizedPercentages.Count;
+                        long weightSum = (long)n * (n + 1) / 2;
+
+                        weightedAverage = normalizedPercentages
+                            .Select((pct, index) => pct * (index + 1))
+                            .Sum() / weightSum;
+                    }
+
+                    // Calculate projected wins
+                    double projectedWinsDecimal = weightedAverage * standardSeasonGames;
+                    int projectedWinsValue = projectedWinsDecimal - Math.Floor(projectedWinsDecimal) >= 0.75
+                        ? (int)Math.Ceiling(projectedWinsDecimal)
+                        : (int)Math.Floor(projectedWinsDecimal);
+
+                    return new { TeamID = g.Key, ProjectedWins = projectedWinsValue };
+                })
+                .ToDictionary(x => x.TeamID, x => x.ProjectedWins);
+
+            return projectedWins;
+        }
+
+        /// <summary>
         /// Calculates team performance trends based on the last 10 years of data.
         /// Returns normalized win percentages (oldest to newest) plus weighted average and projected wins.
         /// Normalizes for 12-game seasons: <=12 games uses actual percentage, >12 games gets 0.25 bump per extra win.
@@ -133,18 +205,46 @@ namespace NCAA_Power_Ratings.Services
         /// <summary>
         /// Calculates and sets Strength of Schedule (SOS) values for all teams in the specified year.
         /// Computes BaseSOS (first-order), SubSOS (second-order), and CombinedSOS (weighted blend).
+        /// Week 0 (default): initializes year with 10-year projected wins.
+        /// Week 1-5: no-op (too early for meaningful SOS).
+        /// Week 6+: uses current year wins.
         /// </summary>
         /// <param name="year">The year to calculate SOS for. Defaults to current year.</param>
+        /// <param name="week">The current week. Defaults to 0 (initialize with projected wins). 1-5 = no-op, 6+ = use current year wins.</param>
         /// <param name="token">Cancellation token.</param>
-        public async Task SetSOS(int? year = null, CancellationToken token = default)
+        public async Task SetSOS(int? year = null, int? week = null, CancellationToken token = default)
         {
             await using var context = await _contextFactory.CreateDbContextAsync(token);
 
             try
             {
                 var targetYear = year ?? DateTime.Now.Year;
+                var targetWeek = week ?? 0;
 
-                // Step 1: GameParticipants - Union of games from winner and loser perspectives
+                // Step 1: Determine which win data to use
+                // If week 1-5, no-op (too early for meaningful SOS)
+                Dictionary<int, int> winsLookup;
+
+                if (targetWeek == 0)
+                {
+                    // Initializing year - use projected wins based on 10-year history
+                    winsLookup = await CalculateProjectedWins(context, targetYear, token);
+                }
+                else
+                {
+                    if (targetWeek < 6)
+                        return;
+                    else
+                    {
+                        // Week 6+ - use current year wins
+                        winsLookup = await context.TeamRecords
+                            .Where(tr => tr.Year == targetYear)
+                            .ToDictionaryAsync(tr => tr.TeamID, tr => (int)tr.Wins, token);
+                    }
+
+                }
+
+                // Step 2: GameParticipants - Union of games from winner and loser perspectives
                 var gamesFromWinner = context.Games
                     .Where(g => g.Year == targetYear)
                     .Select(g => new
@@ -175,34 +275,23 @@ namespace NCAA_Power_Ratings.Services
                     .Union(gamesFromLoser)
                     .ToListAsync(token);
 
-                // Step 2: Join with TeamRecords to get wins
+                // Step 3: Assign wins to each game participant
                 var withRecords = gameParticipants
-                    .Join(
-                        context.TeamRecords.Where(tr => tr.Year == targetYear),
-                        gp => gp.TeamId,
-                        tr => tr.TeamID,
-                        (gp, tr) => new { gp, TeamWins = tr.Wins }
-                    )
-                    .Join(
-                        context.TeamRecords.Where(tr => tr.Year == targetYear),
-                        x => x.gp.OpponentId,
-                        tr => tr.TeamID,
-                        (x, tr) => new
-                        {
-                            x.gp.Year,
-                            x.gp.TeamId,
-                            x.gp.TeamName,
-                            x.TeamWins,
-                            x.gp.OpponentId,
-                            x.gp.OpponentName,
-                            x.gp.TeamPoints,
-                            x.gp.OpponentPoints,
-                            OpponentWins = tr.Wins
-                        }
-                    )
+                    .Select(gp => new
+                    {
+                        gp.Year,
+                        gp.TeamId,
+                        gp.TeamName,
+                        TeamWins = winsLookup.GetValueOrDefault(gp.TeamId, 0),
+                        gp.OpponentId,
+                        gp.OpponentName,
+                        gp.TeamPoints,
+                        gp.OpponentPoints,
+                        OpponentWins = winsLookup.GetValueOrDefault(gp.OpponentId, 0)
+                    })
                     .ToList();
 
-                // Step 3: Join with AvgScoreDeltas and calculate Z-values
+                // Step 4: Join with AvgScoreDeltas and calculate Z-values
                 var avgScoreDeltas = await context.AvgScoreDeltas.ToListAsync(token);
 
                 var withDeltas = withRecords
@@ -237,7 +326,7 @@ namespace NCAA_Power_Ratings.Services
                     })
                     .ToList();
 
-                // Step 4: Assign weights based on Z-values
+                // Step 5: Assign weights based on Z-values
                 var withWeights = withDeltas
                     .Select(d => new
                     {
@@ -256,7 +345,7 @@ namespace NCAA_Power_Ratings.Services
                     })
                     .ToList();
 
-                // Step 5: Calculate BaseSOS per team
+                // Step 6: Calculate BaseSOS per team
                 var baseSOS = withWeights
                     .GroupBy(w => new { w.Year, w.TeamId })
                     .Select(g => new
@@ -268,7 +357,7 @@ namespace NCAA_Power_Ratings.Services
                     })
                     .ToList();
 
-                // Step 6: Calculate OpponentSOS (join weights with opponents' BaseSOS)
+                // Step 7: Calculate OpponentSOS (join weights with opponents' BaseSOS)
                 var opponentSOS = withWeights
                     .Join(
                         baseSOS,
@@ -284,7 +373,7 @@ namespace NCAA_Power_Ratings.Services
                     )
                     .ToList();
 
-                // Step 7: Calculate SecondOrderSOS (SubSOS)
+                // Step 8: Calculate SecondOrderSOS (SubSOS)
                 var secondOrderSOS = opponentSOS
                     .GroupBy(o => new { o.Year, o.TeamId })
                     .Select(g => new
@@ -298,7 +387,7 @@ namespace NCAA_Power_Ratings.Services
                     })
                     .ToList();
 
-                // Step 8: Combine BaseSOS and SubSOS
+                // Step 9: Combine BaseSOS and SubSOS
                 var combined = baseSOS
                     .GroupJoin(
                         secondOrderSOS,
@@ -322,7 +411,7 @@ namespace NCAA_Power_Ratings.Services
                     })
                     .ToList();
 
-                // Step 9: Update TeamRecords
+                // Step 10: Update TeamRecords
                 var teamRecordsToUpdate = await context.TeamRecords
                     .Where(tr => tr.Year == targetYear)
                     .ToListAsync(token);

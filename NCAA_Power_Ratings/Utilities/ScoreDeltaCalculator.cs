@@ -95,7 +95,7 @@ namespace NCAA_Power_Ratings.Utilities
 
                 if (existingRecord != null)
                 {
-                    existingRecord.AverageScoreDelta = (byte)Math.Round((stat.AvgDelta / 100.0)); // adjust scale if needed
+                    existingRecord.AverageScoreDelta = (byte)Math.Round((stat.AvgDelta)); // adjust scale if needed
                     existingRecord.SampleSize = stat.SampleSize;
                 }
                 else
