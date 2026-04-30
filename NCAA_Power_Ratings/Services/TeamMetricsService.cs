@@ -303,9 +303,10 @@ namespace NCAA_Power_Ratings.Services
                     })
                     .ToList();
 
-                // Step 4: Join with AvgScoreDeltas and calculate Z-values
+                // Step 4: Join with AvgScoreDeltas and MatchupHistory for rivalry adjustments
                 var homeFieldAdvantage = _config.HomeFieldAdvantage;
                 var avgScoreDeltas = await context.AvgScoreDeltas.ToListAsync(token);
+                var matchupHistories = await context.MatchupHistories.ToListAsync(token);
 
                 var withDeltas = withRecords
                     .Select(r =>
@@ -335,7 +336,32 @@ namespace NCAA_Power_Ratings.Services
                                 expectedFromTeamPerspective -= homeFieldAdvantage;
                             // else: neutral site, no adjustment
 
-                            zValue = (delta - expectedFromTeamPerspective) / (double)asd.StDevP;
+                            // Check for rivalry matchup and apply variance multiplier
+                            var normalizedTeam1 = Math.Min(r.TeamId, r.OpponentId);
+                            var normalizedTeam2 = Math.Max(r.TeamId, r.OpponentId);
+
+                            var matchupHistory = matchupHistories.FirstOrDefault(m =>
+                                m.Team1Id == normalizedTeam1 && m.Team2Id == normalizedTeam2);
+
+                            var effectiveStDev = (double)asd.StDevP;
+
+                            if (matchupHistory != null)
+                            {
+                                // Get tier-based variance multiplier
+                                var tierMultiplier = matchupHistory.RivalryTier switch
+                                {
+                                    "EPIC" => 1.75,
+                                    "NATIONAL" => 1.5,
+                                    "STATE" => 1.3,
+                                    "MEH" => 1.1,
+                                    _ => 1.0
+                                };
+
+                                // Apply the multiplier to increase variance for rivalry games
+                                effectiveStDev *= tierMultiplier;
+                            }
+
+                            zValue = (delta - expectedFromTeamPerspective) / effectiveStDev;
                         }
 
                         return new
@@ -514,10 +540,11 @@ namespace NCAA_Power_Ratings.Services
                 .Where(tr => tr.Year == targetYear)
                 .ToDictionaryAsync(tr => tr.TeamID, tr => (int)tr.Wins, token);
 
-            // Step 3: Load AvgScoreDeltas
+            // Step 3: Load AvgScoreDeltas and MatchupHistory for rivalry adjustments
             var avgScoreDeltas = await context.AvgScoreDeltas.ToListAsync(token);
+            var matchupHistories = await context.MatchupHistories.ToListAsync(token);
 
-            // Step 4: Calculate Z-score per game per team
+            // Step 4: Calculate Z-score per game per team with rivalry variance adjustments
             var homeFieldAdvantage = _config.HomeFieldAdvantage;
 
             var zScores = gameParticipants
@@ -552,8 +579,34 @@ namespace NCAA_Power_Ratings.Services
                             expectedFromTeamPerspective -= homeFieldAdvantage;
                         // else: neutral site, no adjustment
 
+                        // Check for rivalry matchup and apply variance multiplier
+                        var normalizedTeam1 = Math.Min(gp.TeamId, gp.OpponentId);
+                        var normalizedTeam2 = Math.Max(gp.TeamId, gp.OpponentId);
+
+                        var matchupHistory = matchupHistories.FirstOrDefault(m =>
+                            m.Team1Id == normalizedTeam1 && m.Team2Id == normalizedTeam2);
+
+                        var effectiveStDev = (double)asd.StDevP;
+
+                        if (matchupHistory != null)
+                        {
+                            // Get tier-based variance multiplier
+                            var tierMultiplier = matchupHistory.RivalryTier switch
+                            {
+                                "EPIC" => 1.75,
+                                "NATIONAL" => 1.5,
+                                "STATE" => 1.3,
+                                "MEH" => 1.1,
+                                _ => 1.0
+                            };
+
+                            // Apply the multiplier to increase variance for rivalry games
+                            // Higher variance = lower Z-score magnitude = less impact on ratings
+                            effectiveStDev *= tierMultiplier;
+                        }
+
                         // Z-score: how much better/worse than expected
-                        zScore = (delta - expectedFromTeamPerspective) / (double)asd.StDevP;
+                        zScore = (delta - expectedFromTeamPerspective) / effectiveStDev;
                     }
 
                     return new { gp.TeamId, ZScore = zScore };
