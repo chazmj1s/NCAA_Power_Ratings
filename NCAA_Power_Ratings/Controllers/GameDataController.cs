@@ -18,6 +18,7 @@ namespace NCAA_Power_Ratings.Controllers
         TeamMetricsService teamMetrics,
         IDbContextFactory<NCAAContext> contextFactory,
         ScoreDeltaCalculator scoreDeltaCalculator,
+        MatchupHistoryCalculator matchupHistoryCalculator,
         IOptions<MetricsConfiguration> config,
         ILogger<GameDataController> logger) : ControllerBase
     {
@@ -1011,6 +1012,134 @@ namespace NCAA_Power_Ratings.Controllers
             {
                 logger.LogError(ex, "Error analyzing team games");
                 return StatusCode(500, "An error occurred during analysis.");
+            }
+        }
+
+        /// <summary>
+        /// Calculates and populates matchup-specific historical statistics for rivalry detection.
+        /// Analyzes all team pairings with sufficient game history to identify high-variance matchups.
+        /// Example: POST /api/gamedata/calculateMatchupHistories?minimumGames=10
+        /// </summary>
+        [HttpPost("calculateMatchupHistories")]
+        public async Task<IActionResult> CalculateMatchupHistories([FromQuery] int? minimumGames)
+        {
+            try
+            {
+                var minGames = minimumGames ?? _config.MinimumMatchupGames;
+                var count = await matchupHistoryCalculator.CalculateAllMatchupHistories(minGames);
+
+                return Ok(new
+                {
+                    message = "Matchup histories calculated successfully",
+                    matchupsCreated = count,
+                    minimumGames = minGames,
+                    nextStep = "Matchup-specific variance will now be used in power rating calculations"
+                });
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "Error calculating matchup histories");
+                return StatusCode(500, "An error occurred while calculating matchup histories.");
+            }
+        }
+
+        /// <summary>
+        /// Query matchup histories and detected rivalries.
+        /// Omit all parameters or pass tier=ALL to get all matchups.
+        /// Example: GET /api/gamedata/rivalries?tier=EPIC&minGames=50
+        /// Example: GET /api/gamedata/rivalries (returns all)
+        /// </summary>
+        [HttpGet("rivalries")]
+        public async Task<IActionResult> GetRivalries(
+            [FromQuery] string? tier,
+            [FromQuery] int? minGames,
+            [FromQuery] double? minVarianceRatio)
+        {
+            try
+            {
+                await using var context = await contextFactory.CreateDbContextAsync();
+
+                var query = context.MatchupHistories.AsQueryable();
+
+                // Filter by tier if specified (and not "ALL")
+                if (!string.IsNullOrEmpty(tier) && !tier.Equals("ALL", StringComparison.OrdinalIgnoreCase))
+                {
+                    query = query.Where(m => m.RivalryTier == tier);
+                }
+
+                // Filter by minimum games
+                if (minGames.HasValue)
+                {
+                    query = query.Where(m => m.GamesPlayed >= minGames.Value);
+                }
+
+                var matchups = await query
+                    .OrderByDescending(m => m.GamesPlayed)
+                    .ToListAsync();
+
+                logger.LogInformation("Found {Count} matchups matching filters", matchups.Count);
+
+                // Get team names lookup in batch
+                var teamIds = matchups.SelectMany(m => new[] { m.Team1Id, m.Team2Id }).Distinct().ToList();
+                var teamNames = await context.Teams
+                    .Where(t => teamIds.Contains(t.TeamID))
+                    .ToDictionaryAsync(t => t.TeamID, t => t.TeamName);
+
+                // Calculate average StDev once
+                var avgScoreDeltas = await context.AvgScoreDeltas.ToListAsync();
+                var avgStDev = avgScoreDeltas.Any() ? avgScoreDeltas.Average(a => (double)a.StDevP) : 15.0;
+
+                // Build results
+                var results = new List<object>();
+
+                foreach (var matchup in matchups)
+                {
+                    var team1 = teamNames.GetValueOrDefault(matchup.Team1Id, "Unknown");
+                    var team2 = teamNames.GetValueOrDefault(matchup.Team2Id, "Unknown");
+
+                    // Calculate variance ratio
+                    var varianceRatio = (double)matchup.StDevMargin / avgStDev;
+
+                    // Apply minimum variance ratio filter if specified
+                    if (minVarianceRatio.HasValue && varianceRatio < minVarianceRatio.Value)
+                    {
+                        continue;
+                    }
+
+                    results.Add(new
+                    {
+                        team1,
+                        team2,
+                        rivalryName = matchup.RivalryName ?? "N/A",
+                        tier = matchup.RivalryTier ?? "N/A",
+                        gamesPlayed = matchup.GamesPlayed,
+                        avgMargin = Math.Round((double)matchup.AvgMargin, 1),
+                        stDevMargin = Math.Round((double)matchup.StDevMargin, 1),
+                        upsetRate = Math.Round((double)matchup.UpsetRate, 3),
+                        varianceRatio = Math.Round(varianceRatio, 2),
+                        seriesAge = matchup.LastPlayed - matchup.FirstPlayed,
+                        firstPlayed = matchup.FirstPlayed,
+                        lastPlayed = matchup.LastPlayed
+                    });
+                }
+
+                return Ok(new
+                {
+                    totalMatchups = results.Count,
+                    totalInDatabase = matchups.Count,
+                    filters = new
+                    {
+                        tier = tier ?? "ALL",
+                        minGames = minGames ?? 0,
+                        minVarianceRatio = minVarianceRatio ?? 0.0
+                    },
+                    rivalries = results
+                });
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "Error querying rivalries");
+                return StatusCode(500, "An error occurred while querying rivalries.");
             }
         }
 

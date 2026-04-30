@@ -50,5 +50,20 @@ namespace NCAA_Power_Ratings.Configuration
         /// Values between this and +DominantThreshold are "Expected" performance.
         /// </summary>
         public double UnderperformedThreshold { get; set; } = -0.5;
+
+        /// <summary>
+        /// Minimum number of historical games required for a matchup to use
+        /// matchup-specific variance instead of general win-based variance.
+        /// Lower values = more matchups qualify, but less statistical confidence.
+        /// Recommended: 10-15 games for 60 years of data.
+        /// </summary>
+        public int MinimumMatchupGames { get; set; } = 10;
+
+        /// <summary>
+        /// Maximum variance ratio allowed for matchup-specific adjustments.
+        /// Prevents small-sample outliers from creating extreme multipliers.
+        /// Example: 2.0 means matchup variance can be at most 2x the expected variance.
+        /// </summary>
+        public double MaxVarianceRatio { get; set; } = 2.0;
     }
 }
