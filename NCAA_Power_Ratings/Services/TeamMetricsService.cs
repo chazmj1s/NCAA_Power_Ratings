@@ -437,5 +437,99 @@ namespace NCAA_Power_Ratings.Services
                 throw;
             }
         }
+
+        /// <summary>
+        /// Calculates Power Rating for all teams in the specified year.
+        /// PowerRating = AverageZScore × CombinedSOS
+        /// AverageZScore = mean of per-game Z-scores for the season.
+        /// </summary>
+        public async Task CalculatePowerRatings(int? year = null, CancellationToken token = default)
+        {
+            await using var context = await _contextFactory.CreateDbContextAsync(token);
+
+            var targetYear = year ?? DateTime.Now.Year;
+
+            // Step 1: Get all games for the year
+            var gamesFromWinner = context.Games
+                .Where(g => g.Year == targetYear)
+                .Select(g => new {
+                    g.Year,
+                    TeamId = g.WinnerId,
+                    TeamName = g.WinnerName,
+                    OpponentId = g.LoserId,
+                    TeamPoints = g.WPoints,
+                    OpponentPoints = g.LPoints
+                });
+
+            var gamesFromLoser = context.Games
+                .Where(g => g.Year == targetYear)
+                .Select(g => new {
+                    g.Year,
+                    TeamId = g.LoserId,
+                    TeamName = g.LoserName,
+                    OpponentId = g.WinnerId,
+                    TeamPoints = g.LPoints,
+                    OpponentPoints = g.WPoints
+                });
+
+            var gameParticipants = await gamesFromWinner
+                .Union(gamesFromLoser)
+                .ToListAsync(token);
+
+            // Step 2: Get wins lookup — use projected wins preseason, actual wins week 6+
+            // (reuse same logic as SetSOS — pass week if needed, for now default to actual)
+            var winsLookup = await context.TeamRecords
+                .Where(tr => tr.Year == targetYear)
+                .ToDictionaryAsync(tr => tr.TeamID, tr => (int)tr.Wins, token);
+
+            // Step 3: Load AvgScoreDeltas
+            var avgScoreDeltas = await context.AvgScoreDeltas.ToListAsync(token);
+
+            // Step 4: Calculate Z-score per game per team
+            var zScores = gameParticipants
+                .Select(gp => {
+                    var teamWins = winsLookup.GetValueOrDefault(gp.TeamId, 0);
+                    var oppWins = winsLookup.GetValueOrDefault(gp.OpponentId, 0);
+                    var maxWins = Math.Max(teamWins, oppWins);
+                    var minWins = Math.Min(teamWins, oppWins);
+
+                    var delta = gp.TeamPoints - gp.OpponentPoints;
+                    // Normalize delta direction — always from the higher-win team's perspective
+                    var normalizedDelta = teamWins >= oppWins ? delta : -delta;
+
+                    var asd = avgScoreDeltas.FirstOrDefault(
+                        a => a.Team1Wins == maxWins && a.Team2Wins == minWins);
+
+                    double zScore = 0.0;
+                    if (asd != null && asd.StDevP != 0)
+                        zScore = ((double)normalizedDelta - (double)asd.AverageScoreDelta)
+                                 / (double)asd.StDevP;
+
+                    return new { gp.TeamId, ZScore = zScore };
+                })
+                .GroupBy(x => x.TeamId)
+                .Select(g => new {
+                    TeamId = g.Key,
+                    AvgZScore = g.Average(x => x.ZScore)
+                })
+                .ToList();
+
+            // Step 5: Multiply by CombinedSOS and store
+            var teamRecords = await context.TeamRecords
+                .Where(tr => tr.Year == targetYear)
+                .ToListAsync(token);
+
+            foreach (var record in teamRecords)
+            {
+                var zData = zScores.FirstOrDefault(z => z.TeamId == record.TeamID);
+                if (zData != null)
+                {
+                    var sos = (double)(record.CombinedSOS ?? 1.0m);
+                    record.PowerRating = (decimal)Math.Round(zData.AvgZScore * sos, 4);
+                }
+            }
+
+            await context.SaveChangesAsync(token);
+        }
     }
 }

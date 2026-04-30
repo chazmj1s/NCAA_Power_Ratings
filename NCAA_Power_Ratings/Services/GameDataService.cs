@@ -2,6 +2,7 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Internal;
 using NCAA_Power_Ratings.Data;
+using NCAA_Power_Ratings.Extensions;
 using NCAA_Power_Ratings.Interfaces;
 using NCAA_Power_Ratings.Models;
 using NCAA_Power_Ratings.ModelViews;
@@ -133,17 +134,77 @@ namespace NCAA_Power_Ratings.Services
         public async Task<int> UpdateGameDataForYearAndWeekAsync(int year, int week, CancellationToken token = default)
         {
             await using var context = await _contextFactory.CreateDbContextAsync(token);
-            
+
+            List<Game> scrapedGames;
+            bool usedLocalFile = false;
+
             try
             {
-                // Fetch fresh data from the web for the specified year
+                // Try to fetch fresh data from the web for the specified year
                 using var httpClient = new HttpClient();
                 string url = $"https://www.sports-reference.com/cfb/years/{year}-schedule.html";
-                var scrapedGames = await ExtractGameDataForSingleYearAsync(httpClient, url, context, year);
-                
+                scrapedGames = await ExtractGameDataForSingleYearAsync(httpClient, url, context, year);
+                Console.WriteLine($"Successfully scraped data from web for year {year}");
+            }
+            catch (HttpRequestException ex)
+            {
+                Console.WriteLine($"Web scraping failed: {ex.Message}");
+
+                // Try to fall back to local file
+                var dataDirectory = _configuration.GetValue<string>("CustomSettings:FilePath", "NCAA Raw Game Data");
+                var filePath = Path.Combine(dataDirectory, $"{year}.txt");
+
+                if (File.Exists(filePath))
+                {
+                    Console.WriteLine($"Falling back to local file: {filePath}");
+
+                    try
+                    {
+                        var teams = await context.Teams.ToListAsync(token);
+                        scrapedGames = new List<Game>();
+
+                        // Read games from the file
+                        await foreach (var recordInfo in ReadRecordsFromFileAsync(filePath, token))
+                        {
+                            if (recordInfo.Fields.Length >= 9)
+                            {
+                                var gameData = recordInfo.Fields.ToGame(recordInfo.FileName, teams);
+                                scrapedGames.Add(gameData);
+                            }
+                        }
+
+                        usedLocalFile = true;
+                        Console.WriteLine($"Successfully loaded {scrapedGames.Count} games from local file");
+                    }
+                    catch (Exception fileEx)
+                    {
+                        Console.WriteLine($"Error reading local file: {fileEx.Message}");
+                        throw new InvalidOperationException(
+                            $"Web scraping failed and local file read failed. " +
+                            $"Please perform a manual scrape to initialize year {year}. " +
+                            $"Web error: {ex.Message}, File error: {fileEx.Message}", ex);
+                    }
+                }
+                else
+                {
+                    Console.WriteLine($"Local file not found: {filePath}");
+                    throw new InvalidOperationException(
+                        $"Web scraping failed and no local file found at {filePath}. " +
+                        $"Please perform a manual scrape to initialize year {year}. " +
+                        $"Error: {ex.Message}", ex);
+                }
+            }
+            catch (Exception ex) when (ex is not InvalidOperationException)
+            {
+                Console.WriteLine($"Unexpected error during data fetch: {ex.Message}");
+                throw;
+            }
+
+            try
+            {
                 // Filter to only the games for the specified week
                 var weekGames = scrapedGames.Where(g => g.Week == week).ToList();
-                
+
                 if (weekGames.Count == 0)
                 {
                     Console.WriteLine($"No games found for year {year}, week {week}.");
@@ -159,7 +220,7 @@ namespace NCAA_Power_Ratings.Services
 
                 int updated = 0, added = 0;
 
-                foreach (var game in scrapedGames)
+                foreach (var game in weekGames)
                 {
                     var key = (game.WinnerId, game.LoserId);
 
@@ -178,16 +239,12 @@ namespace NCAA_Power_Ratings.Services
                     }
                 }
 
-                int Changes = await context.SaveChangesAsync(token);
+                int changes = await context.SaveChangesAsync(token);
 
-                Console.WriteLine($"Processed {year}-W{week}: added {added}, updated {updated}, total changes {{Changes}}");
+                var source = usedLocalFile ? "local file" : "web scraping";
+                Console.WriteLine($"Processed {year}-W{week} from {source}: added {added}, updated {updated}, total changes {changes}");
 
                 return added + updated;
-            }
-            catch (HttpRequestException ex) when (ex.StatusCode is HttpStatusCode.NotFound)
-            {
-                Console.WriteLine($"Schedule page not found for {year} week {week}");
-                return 0;
             }
             catch (Exception ex)
             {
@@ -284,6 +341,117 @@ namespace NCAA_Power_Ratings.Services
                 {
                     yield return record;
                 }
+            }
+        }
+
+        /// <summary>
+        /// Processes a single file from the NCAA Raw Game Data directory.
+        /// Useful for debugging when you want to test processing a specific file.
+        /// </summary>
+        /// <param name="filePath">Full path to the file to process</param>
+        /// <param name="token">Cancellation token</param>
+        /// <returns>Number of records processed</returns>
+        public async Task<int> ProcessSingleFileAsync(string filePath, CancellationToken token = default)
+        {
+            if (!File.Exists(filePath))
+            {
+                throw new FileNotFoundException($"File not found: {filePath}");
+            }
+
+            Console.WriteLine($"Processing file: {filePath}");
+            var recordsProcessed = 0;
+
+            await foreach (var recordInfo in ReadRecordsFromFileAsync(filePath, token))
+            {
+                await _recordProcessor.ProcessSingleRecordAsync(recordInfo.Fields, recordInfo.FileName, token);
+                recordsProcessed++;
+            }
+
+            Console.WriteLine($"Completed processing {recordsProcessed} records from {Path.GetFileName(filePath)}");
+            return recordsProcessed;
+        }
+
+        /// <summary>
+        /// Parallel method to UpdateGameDataForYearAndWeekAsync that uses a local file instead of web scraping.
+        /// Useful for debugging when the website is inaccessible or for testing with known data.
+        /// </summary>
+        /// <param name="filePath">Full path to the CSV file containing game data for the year</param>
+        /// <param name="year">Year of the games</param>
+        /// <param name="week">Week number to filter and update</param>
+        /// <param name="token">Cancellation token</param>
+        /// <returns>Number of games added or updated</returns>
+        public async Task<int> UpdateGameDataFromFileAsync(string filePath, int year, int week, CancellationToken token = default)
+        {
+            if (!File.Exists(filePath))
+            {
+                throw new FileNotFoundException($"File not found: {filePath}");
+            }
+
+            await using var context = await _contextFactory.CreateDbContextAsync(token);
+
+            try
+            {
+                var teams = await context.Teams.ToListAsync(token);
+                var fileGames = new List<Game>();
+
+                // Read games from the file
+                await foreach (var recordInfo in ReadRecordsFromFileAsync(filePath, token))
+                {
+                    if (recordInfo.Fields.Length >= 9)
+                    {
+                        var gameData = recordInfo.Fields.ToGame(recordInfo.FileName, teams);
+                        fileGames.Add(gameData);
+                    }
+                }
+
+                // Filter to only the games for the specified week
+                var weekGames = fileGames.Where(g => g.Week == week).ToList();
+
+                if (weekGames.Count == 0)
+                {
+                    Console.WriteLine($"No games found for year {year}, week {week} in file {Path.GetFileName(filePath)}.");
+                    return 0;
+                }
+
+                // Load existing games for this year and week from database
+                var existing = await context.Games
+                    .Where(g => g.Year == year && g.Week == week)
+                    .ToDictionaryAsync(
+                        g => (g.WinnerId, g.LoserId),
+                        g => g,
+                        token);
+
+                int updated = 0, added = 0;
+
+                foreach (var game in weekGames)
+                {
+                    var key = (game.WinnerId, game.LoserId);
+
+                    if (existing.TryGetValue(key, out var dbGame))
+                    {
+                        if (ShouldUpdate(dbGame, game))
+                        {
+                            UpdateGameProperties(dbGame, game);
+                            updated++;
+                        }
+                    }
+                    else
+                    {
+                        context.Games.Add(game);
+                        added++;
+                    }
+                }
+
+                int changes = await context.SaveChangesAsync(token);
+
+                Console.WriteLine($"Processed {year}-W{week} from file: added {added}, updated {updated}, total changes {changes}");
+
+                return added + updated;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Error processing file for year {year}, week {week}: {ex.Message}");
+                throw;
             }
         }
 

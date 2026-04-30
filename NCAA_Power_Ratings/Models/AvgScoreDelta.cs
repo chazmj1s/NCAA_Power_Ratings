@@ -16,7 +16,7 @@ namespace NCAA_Power_Ratings.Models
         [Column("Team2Wins", TypeName = "tinyint")]
         public byte Team2Wins { get; set; }
 
-        [Column("AverageScoreDelta", TypeName = "decimal(5,4)")]
+        [Column("AverageScoreDelta", TypeName = "decimal(6,2)")]
         public byte AverageScoreDelta { get; set; }
 
         [Column("StDevP", TypeName = "decimal(10,8)")]

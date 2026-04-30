@@ -9,5 +9,7 @@ namespace NCAA_Power_Ratings.Interfaces
         public Task<int> LoadGameHistoryFromFiles();
         public Task<int> LoadTeamDataFromFile();
         public Task UpdateTeamRecordsAsync(int? targetYear = null, CancellationToken token = default);
+        public Task<int> ProcessSingleFileAsync(string filePath, CancellationToken token = default);
+        public Task<int> UpdateGameDataFromFileAsync(string filePath, int year, int week, CancellationToken token = default);
     }
 }
