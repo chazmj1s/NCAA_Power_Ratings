@@ -10,7 +10,7 @@ namespace NCAA_Power_Ratings.Utilities
         {
             await using var context = await _contextFactory.CreateDbContextAsync(token);
 
-            // Join Games with TeamRecords for winner and loser, project to CTE-like structure
+            // Join Games with TeamRecords for winner and loser, calculate win percentages
             var cteData = await context.Games
                 .Where(g => g.Year > 0)
                 .Join(
@@ -26,39 +26,62 @@ namespace NCAA_Power_Ratings.Utilities
                     (x, tl) => new
                     {
                         WinnerWins = x.WinnerRecord.Wins,
+                        WinnerLosses = x.WinnerRecord.Losses,
                         LoserWins = tl.Wins,
+                        LoserLosses = tl.Losses,
                         WinnerPoints = x.Game.WPoints,
                         LoserPoints = x.Game.LPoints
                     }
                 )
                 .Select(x => new
                 {
-                    // Normalize so W1 >= W2; adjust Delta accordingly
-                    W1 = x.WinnerWins >= x.LoserWins ? x.WinnerWins : x.LoserWins,
-                    W2 = x.WinnerWins >= x.LoserWins ? x.LoserWins : x.WinnerWins,
-                    Delta = x.WinnerWins >= x.LoserWins
-                        ? x.WinnerPoints - x.LoserPoints
-                        : x.LoserPoints - x.WinnerPoints
+                    WinnerWinPct = (x.WinnerWins + x.WinnerLosses) > 0 
+                        ? (decimal)x.WinnerWins / (x.WinnerWins + x.WinnerLosses) 
+                        : 0m,
+                    LoserWinPct = (x.LoserWins + x.LoserLosses) > 0 
+                        ? (decimal)x.LoserWins / (x.LoserWins + x.LoserLosses) 
+                        : 0m,
+                    WinnerPoints = x.WinnerPoints,
+                    LoserPoints = x.LoserPoints
                 })
                 .ToListAsync(token);
 
-            // Group by (W1, W2) and calculate statistics in memory (STDEVP requires client eval)
-            var results = cteData
-                .GroupBy(x => new { x.W1, x.W2 })
+            // Round to 0.05 increments (5% buckets) and normalize so Team1WinPct >= Team2WinPct
+            var normalizedData = cteData
+                .Select(x => new
+                {
+                    WinPct1 = Math.Round(x.WinnerWinPct * 20m, MidpointRounding.AwayFromZero) / 20m,
+                    WinPct2 = Math.Round(x.LoserWinPct * 20m, MidpointRounding.AwayFromZero) / 20m,
+                    WinnerPoints = x.WinnerPoints,
+                    LoserPoints = x.LoserPoints
+                })
+                .Select(x => new
+                {
+                    Team1WinPct = x.WinPct1 >= x.WinPct2 ? x.WinPct1 : x.WinPct2,
+                    Team2WinPct = x.WinPct1 >= x.WinPct2 ? x.WinPct2 : x.WinPct1,
+                    Delta = x.WinPct1 >= x.WinPct2
+                        ? x.WinnerPoints - x.LoserPoints
+                        : x.LoserPoints - x.WinnerPoints
+                })
+                .ToList();
+
+            // Group by (Team1WinPct, Team2WinPct) and calculate statistics
+            var results = normalizedData
+                .GroupBy(x => new { x.Team1WinPct, x.Team2WinPct })
                 .Select(g =>
                 {
                     var deltas = g.Select(x => (double)x.Delta).ToList();
                     return new AvgScoreDeltaStats
                     {
-                        Team1Wins = g.Key.W1,
-                        Team2Wins = g.Key.W2,
+                        Team1WinPct = g.Key.Team1WinPct,
+                        Team2WinPct = g.Key.Team2WinPct,
                         AvgDelta = Math.Round(deltas.Average(), 2),
                         StdDevP = CalculateStandardDeviationPopulation(deltas),
                         SampleSize = g.Count()
                     };
                 })
-                .OrderBy(x => x.Team1Wins)
-                .ThenBy(x => x.Team2Wins)
+                .OrderByDescending(x => x.Team1WinPct)
+                .ThenByDescending(x => x.Team2WinPct)
                 .ToList();
 
             return results;
@@ -91,7 +114,7 @@ namespace NCAA_Power_Ratings.Utilities
             foreach (var stat in stats)
             {
                 var existingRecord = existing.FirstOrDefault(e =>
-                    e.Team1Wins == stat.Team1Wins && e.Team2Wins == stat.Team2Wins);
+                    e.Team1WinPct == stat.Team1WinPct && e.Team2WinPct == stat.Team2WinPct);
 
                 if (existingRecord != null)
                 {
@@ -103,8 +126,8 @@ namespace NCAA_Power_Ratings.Utilities
                 {
                     context.AvgScoreDeltas.Add(new AvgScoreDelta
                     {
-                        Team1Wins = stat.Team1Wins,
-                        Team2Wins = stat.Team2Wins,
+                        Team1WinPct = stat.Team1WinPct,
+                        Team2WinPct = stat.Team2WinPct,
                         AverageScoreDelta = (decimal)Math.Round(stat.AvgDelta, 2),
                         StDevP = (decimal)Math.Round(stat.StdDevP, 8),
                         SampleSize = stat.SampleSize
@@ -117,12 +140,12 @@ namespace NCAA_Power_Ratings.Utilities
     }
 
     /// <summary>   
-    /// DTO for average score delta statistics by win counts.
+    /// DTO for average score delta statistics by win percentages.
     /// </summary>
     public class AvgScoreDeltaStats
     {
-        public byte Team1Wins { get; set; }
-        public byte Team2Wins { get; set; }
+        public decimal Team1WinPct { get; set; }
+        public decimal Team2WinPct { get; set; }
         public double AvgDelta { get; set; }
         public double StdDevP { get; set; }
         public int SampleSize { get; set; }
