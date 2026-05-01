@@ -58,8 +58,14 @@ namespace NCAA_Power_Ratings.Mobile.Services
 
                 if (rankings != null && rankings.Count > 0)
                 {
-                    System.Diagnostics.Debug.WriteLine($"[API] First team: {rankings[0].TeamName} - Rank: {rankings[0].Rank} - Power: {rankings[0].Ranking}");
-                    System.Diagnostics.Debug.WriteLine($"[API] Last team: {rankings[^1].TeamName} - Rank: {rankings[^1].Rank} - Power: {rankings[^1].Ranking}");
+                    // Map OverallRank to Rank for backward compatibility
+                    foreach (var ranking in rankings)
+                    {
+                        ranking.Rank = ranking.OverallRank;
+                    }
+
+                    System.Diagnostics.Debug.WriteLine($"[API] First team: {rankings[0].TeamName} - Rank: {rankings[0].Rank} ({rankings[0].Tier} #{rankings[0].TierRank}) - Power: {rankings[0].Ranking}");
+                    System.Diagnostics.Debug.WriteLine($"[API] Last team: {rankings[^1].TeamName} - Rank: {rankings[^1].Rank} ({rankings[^1].Tier} #{rankings[^1].TierRank}) - Power: {rankings[^1].Ranking}");
                 }
                 else
                 {
