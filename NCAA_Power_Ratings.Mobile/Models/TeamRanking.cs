@@ -10,6 +10,13 @@ namespace NCAA_Power_Ratings.Mobile.Models
         public string? Conference { get; set; }
         public string? ConferenceAbbr { get; set; }
         public string? Division { get; set; }
+
+        // Tier classification and ranking
+        public string? Tier { get; set; }           // "P4", "G5", "Independent", "Other"
+        public int OverallRank { get; set; }        // Rank among ALL teams (1-133)
+        public int TierRank { get; set; }           // Rank within tier (e.g., #1 G5)
+
+        // Keep Rank for backward compatibility (maps to OverallRank)
         public int Rank { get; set; }
         public decimal? Ranking { get; set; }
         public int Year { get; set; }
@@ -19,9 +26,17 @@ namespace NCAA_Power_Ratings.Mobile.Models
         public decimal? CombinedSOS { get; set; }
 
         public string Record => $"{Wins}-{Losses}";
+
+        // Display helpers
         public string DisplayRank => $"#{Rank}";
+        public string DisplayOverallRank => $"#{OverallRank}";
+        public string DisplayTierRank => $"#{TierRank}";
+        public string DisplayTier => Tier ?? "N/A";
+        public string DisplayTierWithRank => $"{DisplayTier} #{TierRank}";
+
         public string DisplayRanking => Ranking?.ToString("F4") ?? "N/A";
         public string DisplaySOS => CombinedSOS?.ToString("F4") ?? "N/A";
+
         public bool IsTop25 => Rank <= 25;
     }
 }
