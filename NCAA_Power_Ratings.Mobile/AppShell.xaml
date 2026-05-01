@@ -4,11 +4,21 @@
     xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
     xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
     xmlns:local="clr-namespace:NCAA_Power_Ratings.Mobile"
-    Title="NCAA_Power_Ratings.Mobile">
+    xmlns:views="clr-namespace:NCAA_Power_Ratings.Mobile.Views"
+    Title="NCAA Power Ratings">
 
-    <ShellContent
-        Title="Home"
-        ContentTemplate="{DataTemplate local:MainPage}"
-        Route="MainPage" />
+    <TabBar>
+        <ShellContent
+            Title="Rankings"
+            Icon="trophy.png"
+            ContentTemplate="{DataTemplate views:PowerRankingsPage}"
+            Route="PowerRankingsPage" />
+
+        <ShellContent
+            Title="Home"
+            Icon="home.png"
+            ContentTemplate="{DataTemplate local:MainPage}"
+            Route="MainPage" />
+    </TabBar>
 
 </Shell>

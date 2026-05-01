@@ -1,4 +1,7 @@
-﻿namespace NCAA_Power_Ratings.Mobile;
+﻿using Microsoft.Maui.Controls;
+using Microsoft.Maui.Accessibility;
+
+namespace NCAA_Power_Ratings.Mobile;
 
 public partial class MainPage : ContentPage
 {
