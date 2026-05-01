@@ -32,6 +32,7 @@ builder.Services.AddTransient<RecordProcessor>();
 builder.Services.AddTransient<ScoreDeltaCalculator>();
 builder.Services.AddTransient<TeamMetricsService>();
 builder.Services.AddTransient<MatchupHistoryCalculator>();
+builder.Services.AddTransient<GamePredictionService>();
 
 // Add services to the container.
 builder.Services.AddControllersWithViews();

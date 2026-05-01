@@ -16,6 +16,7 @@ namespace NCAA_Power_Ratings.Controllers
     public class GameDataController(
         IGameDataService gameDataService, 
         TeamMetricsService teamMetrics,
+        GamePredictionService gamePredictionService,
         IDbContextFactory<NCAAContext> contextFactory,
         ScoreDeltaCalculator scoreDeltaCalculator,
         MatchupHistoryCalculator matchupHistoryCalculator,
@@ -279,10 +280,12 @@ namespace NCAA_Power_Ratings.Controllers
                         await teamMetrics.SetSOS(year, week: 0);
                         // Then calculate power ratings
                         await teamMetrics.CalculatePowerRatings(year);
+                        // Finally calculate rankings
+                        await teamMetrics.CalculateRankings(year);
 
                         results.Add(new { year, status = "success" });
                         successCount++;
-                        logger.LogInformation("SOS and power ratings calculated for year {Year}", year);
+                        logger.LogInformation("SOS, power ratings, and rankings calculated for year {Year}", year);
                     }
                     catch (Exception ex)
                     {
@@ -307,6 +310,183 @@ namespace NCAA_Power_Ratings.Controllers
             {
                 logger.LogError(ex, "Error during metrics backfill");
                 return StatusCode(500, "An error occurred while backfilling metrics.");
+            }
+        }
+
+        /// <summary>
+        /// Calculates rankings (WinPct × CombinedSOS × (1 + PowerRating)) for a specific year.
+        /// Must be run after SetSOS and CalculatePowerRatings.
+        /// Can be run weekly during the season as new results come in.
+        /// Example: POST /api/gamedata/calculateRankings?year=2024
+        /// </summary>
+        [HttpPost("calculateRankings")]
+        public async Task<IActionResult> CalculateRankings([FromQuery] int? year)
+        {
+            try
+            {
+                var targetYear = year ?? DateTime.Now.Year;
+
+                await teamMetrics.CalculateRankings(targetYear);
+
+                return Ok(new 
+                { 
+                    message = "Rankings calculated successfully",
+                    year = targetYear
+                });
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "Error calculating rankings");
+                return StatusCode(500, "An error occurred while calculating rankings.");
+            }
+        }
+
+        /// <summary>
+        /// Calculates all metrics (SOS, PowerRating, Ranking) for a specific year and week.
+        /// Week-aware logic:
+        /// - Week 0: Initialize with projected wins (10-year historical average)
+        /// - Weeks 1-5: Calculate PR and Ranking only (SOS not meaningful yet)
+        /// - Week 6+: Calculate SOS with actual wins, then PR and Ranking
+        /// 
+        /// Use this endpoint after loading each week's games during the season.
+        /// Example: POST /api/gamedata/updateWeeklyMetrics?year=2025&week=3
+        /// </summary>
+        [HttpPost("updateWeeklyMetrics")]
+        public async Task<IActionResult> UpdateWeeklyMetrics([FromQuery] int? year, [FromQuery] int? week)
+        {
+            try
+            {
+                var targetYear = year ?? DateTime.Now.Year;
+                var targetWeek = week ?? 0;
+
+                string message;
+
+                if (targetWeek == 0)
+                {
+                    // Week 0: Initialize with projected wins
+                    await teamMetrics.SetSOS(targetYear, 0);
+                    await teamMetrics.CalculatePowerRatings(targetYear);
+                    await teamMetrics.CalculateRankings(targetYear);
+                    message = $"Metrics initialized for {targetYear} with projected wins";
+                }
+                else if (targetWeek < 6)
+                {
+                    // Weeks 1-5: Only calculate PR and Ranking (SOS too early)
+                    await teamMetrics.CalculatePowerRatings(targetYear);
+                    await teamMetrics.CalculateRankings(targetYear);
+                    message = $"PowerRating and Ranking calculated for {targetYear} week {targetWeek} (SOS not updated - too early)";
+                }
+                else
+                {
+                    // Week 6+: Full calculation with actual wins
+                    await teamMetrics.SetSOS(targetYear, targetWeek);
+                    await teamMetrics.CalculatePowerRatings(targetYear);
+                    await teamMetrics.CalculateRankings(targetYear);
+                    message = $"Full metrics calculated for {targetYear} week {targetWeek} with actual wins";
+                }
+
+                logger.LogInformation(message);
+
+                return Ok(new 
+                { 
+                    message,
+                    year = targetYear,
+                    week = targetWeek
+                });
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "Error updating weekly metrics for year={Year}, week={Week}", year, week);
+                return StatusCode(500, "An error occurred while updating weekly metrics.");
+            }
+        }
+
+        /// <summary>
+        /// Predicts the score for a single matchup between two teams.
+        /// Location: 'H' = team is home, 'A' = team is away, 'N' = neutral site
+        /// 
+        /// Example: GET /api/gamedata/predictMatchup?year=2025&teamName=Ohio State&opponentName=Michigan&location=H&week=12
+        /// </summary>
+        [HttpGet("predictMatchup")]
+        public async Task<IActionResult> PredictMatchup(
+            [FromQuery] int? year,
+            [FromQuery] string teamName,
+            [FromQuery] string opponentName,
+            [FromQuery] char location = 'N',
+            [FromQuery] int week = 0)
+        {
+            try
+            {
+                if (string.IsNullOrEmpty(teamName) || string.IsNullOrEmpty(opponentName))
+                {
+                    return BadRequest("Both teamName and opponentName are required");
+                }
+
+                var targetYear = year ?? DateTime.Now.Year;
+
+                var prediction = await gamePredictionService.PredictMatchup(
+                    targetYear, teamName, opponentName, location, week);
+
+                return Ok(new
+                {
+                    matchup = $"{prediction.TeamName} {prediction.LocationDisplay} {prediction.OpponentName}",
+                    prediction = $"{prediction.TeamName} {prediction.PredictedTeamScore:F1}, {prediction.OpponentName} {prediction.PredictedOpponentScore:F1}",
+                    expectedMargin = prediction.ExpectedMargin,
+                    marginOfError = prediction.MarginOfError,
+                    confidence = prediction.Confidence,
+                    teamRecord = $"{prediction.TeamWins}-?",
+                    opponentRecord = $"{prediction.OpponentWins}-?",
+                    teamPowerRating = prediction.TeamPowerRating,
+                    opponentPowerRating = prediction.OpponentPowerRating,
+                    rivalryNote = prediction.RivalryNote,
+                    summary = prediction.PredictionSummary
+                });
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "Error predicting matchup");
+                return StatusCode(500, ex.Message);
+            }
+        }
+
+        /// <summary>
+        /// Predicts scores for multiple matchups provided in the request body.
+        /// POST body example:
+        /// {
+        ///   "year": 2025,
+        ///   "matchups": [
+        ///     { "teamName": "Ohio State", "opponentName": "Michigan", "location": "H", "week": 12 },
+        ///     { "teamName": "Alabama", "opponentName": "Auburn", "location": "N", "week": 13 }
+        ///   ]
+        /// }
+        /// </summary>
+        [HttpPost("predictMatchups")]
+        public async Task<IActionResult> PredictMatchups([FromBody] MatchupBatchRequest request)
+        {
+            try
+            {
+                var predictions = await gamePredictionService.PredictMatchups(
+                    request.Year, request.Matchups);
+
+                return Ok(new
+                {
+                    message = $"Predicted {predictions.Count} matchups for {request.Year}",
+                    predictions = predictions.Select(p => new
+                    {
+                        matchup = $"{p.TeamName} {p.LocationDisplay} {p.OpponentName}",
+                        prediction = $"{p.TeamName} {p.PredictedTeamScore:F1}, {p.OpponentName} {p.PredictedOpponentScore:F1}",
+                        expectedMargin = p.ExpectedMargin,
+                        marginOfError = p.MarginOfError,
+                        confidence = p.Confidence,
+                        rivalryNote = p.RivalryNote,
+                        summary = p.PredictionSummary
+                    })
+                });
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "Error predicting matchups");
+                return StatusCode(500, ex.Message);
             }
         }
 
@@ -369,13 +549,41 @@ namespace NCAA_Power_Ratings.Controllers
                 }
 
                 var gamesProcessed = await gameDataService.UpdateGameDataFromFileAsync(filePath, year, week);
-                await teamMetrics.SetSOS(year, week);  // auto-recalc SOS
-                await teamMetrics.CalculatePowerRatings(year);         // refresh power ratings
+
+                // Automatically update team records after loading games
+                await gameDataService.UpdateTeamRecordsAsync(year);
+
+                // Calculate metrics using week-aware logic
+                string metricsMessage;
+                if (week == 0)
+                {
+                    // Week 0: Initialize with projected wins
+                    await teamMetrics.SetSOS(year, 0);
+                    await teamMetrics.CalculatePowerRatings(year);
+                    await teamMetrics.CalculateRankings(year);
+                    metricsMessage = $"Metrics initialized for {year} with projected wins";
+                }
+                else if (week < 6)
+                {
+                    // Weeks 1-5: Only calculate PR and Ranking (SOS too early)
+                    await teamMetrics.CalculatePowerRatings(year);
+                    await teamMetrics.CalculateRankings(year);
+                    metricsMessage = $"PowerRating and Ranking calculated for {year} week {week} (SOS not updated - too early)";
+                }
+                else
+                {
+                    // Week 6+: Full calculation with actual wins
+                    await teamMetrics.SetSOS(year, week);
+                    await teamMetrics.CalculatePowerRatings(year);
+                    await teamMetrics.CalculateRankings(year);
+                    metricsMessage = $"Full metrics calculated for {year} week {week} with actual wins";
+                }
 
                 return Ok(new 
                 { 
                     message = $"Successfully processed games for {year} week {week} from file",
                     gamesProcessed = gamesProcessed,
+                    metricsCalculated = metricsMessage,
                     year = year,
                     week = week,
                     sourceFile = fileName
@@ -786,8 +994,8 @@ namespace NCAA_Power_Ratings.Controllers
                 {
                     var entity = new AvgScoreDelta
                     {
-                        Team1Wins = stat.Team1Wins,
-                        Team2Wins = stat.Team2Wins,
+                        Team1WinPct = stat.Team1WinPct,
+                        Team2WinPct = stat.Team2WinPct,
                         AverageScoreDelta = (decimal)stat.AvgDelta,
                         StDevP = (decimal)stat.StdDevP,
                         SampleSize = stat.SampleSize
@@ -805,8 +1013,8 @@ namespace NCAA_Power_Ratings.Controllers
                     recordCount = results.Count,
                     sample = results.Take(5).Select(r => new
                     {
-                        r.Team1Wins,
-                        r.Team2Wins,
+                        r.Team1WinPct,
+                        r.Team2WinPct,
                         AverageScoreDelta = r.AvgDelta,
                         StDevP = r.StdDevP,
                         r.SampleSize
@@ -917,10 +1125,13 @@ namespace NCAA_Power_Ratings.Controllers
                     .OrderBy(g => g.Week)
                     .ToListAsync();
 
-                // Get wins lookup
-                var winsLookup = await context.TeamRecords
+                // Get wins and losses lookup
+                var teamRecords = await context.TeamRecords
                     .Where(tr => tr.Year == targetYear)
-                    .ToDictionaryAsync(tr => tr.TeamID, tr => (int)tr.Wins);
+                    .ToDictionaryAsync(tr => tr.TeamID);
+
+                var winsLookup = teamRecords.ToDictionary(kvp => kvp.Key, kvp => (int)kvp.Value.Wins);
+                var lossesLookup = teamRecords.ToDictionary(kvp => kvp.Key, kvp => (int)kvp.Value.Losses);
 
                 // Get AvgScoreDeltas
                 var avgScoreDeltas = await context.AvgScoreDeltas.ToListAsync();
@@ -929,14 +1140,28 @@ namespace NCAA_Power_Ratings.Controllers
                 var homeFieldAdvantage = _config.HomeFieldAdvantage;
                 var analysis = games.Select(g => {
                     var teamWins = winsLookup.GetValueOrDefault(g.TeamId, 0);
+                    var teamLosses = lossesLookup.GetValueOrDefault(g.TeamId, 0);
                     var oppWins = winsLookup.GetValueOrDefault(g.OpponentId, 0);
-                    var maxWins = Math.Max(teamWins, oppWins);
-                    var minWins = Math.Min(teamWins, oppWins);
+                    var oppLosses = lossesLookup.GetValueOrDefault(g.OpponentId, 0);
+
+                    // Calculate win percentages (round to 0.05 increments for 5% buckets)
+                    var teamGamesPlayed = teamWins + teamLosses;
+                    var oppGamesPlayed = oppWins + oppLosses;
+
+                    var teamWinPct = teamGamesPlayed > 0 
+                        ? Math.Round((decimal)teamWins / teamGamesPlayed * 20m, MidpointRounding.AwayFromZero) / 20m
+                        : 0m;
+                    var oppWinPct = oppGamesPlayed > 0 
+                        ? Math.Round((decimal)oppWins / oppGamesPlayed * 20m, MidpointRounding.AwayFromZero) / 20m
+                        : 0m;
+
+                    var maxWinPct = Math.Max(teamWinPct, oppWinPct);
+                    var minWinPct = Math.Min(teamWinPct, oppWinPct);
 
                     var delta = g.Delta;
 
                     var asd = avgScoreDeltas.FirstOrDefault(
-                        a => a.Team1Wins == maxWins && a.Team2Wins == minWins);
+                        a => a.Team1WinPct == maxWinPct && a.Team2WinPct == minWinPct);
 
                     double zScore = 0.0;
                     double expectedDelta = 0.0;
@@ -948,7 +1173,7 @@ namespace NCAA_Power_Ratings.Controllers
                         expectedDelta = (double)asd.AverageScoreDelta;
 
                         // Adjust expected to team's perspective
-                        var expectedFromTeamPerspective = teamWins >= oppWins 
+                        var expectedFromTeamPerspective = teamWinPct >= oppWinPct 
                             ? expectedDelta 
                             : -expectedDelta;
 
@@ -1224,5 +1449,14 @@ namespace NCAA_Power_Ratings.Controllers
                 return StatusCode(500, "An error occurred during diagnostic.");
             }
         }
+    }
+
+    /// <summary>
+    /// Request model for batch matchup predictions.
+    /// </summary>
+    public class MatchupBatchRequest
+    {
+        public int Year { get; set; }
+        public List<NCAA_Power_Ratings.Services.MatchupRequest> Matchups { get; set; }
     }
 }

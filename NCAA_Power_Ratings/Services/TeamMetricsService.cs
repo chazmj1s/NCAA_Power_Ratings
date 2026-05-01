@@ -230,11 +230,13 @@ namespace NCAA_Power_Ratings.Services
                 // Step 1: Determine which win data to use
                 // If week 1-5, no-op (too early for meaningful SOS)
                 Dictionary<int, int> winsLookup;
+                Dictionary<int, int> lossesLookup;
 
                 if (targetWeek == 0)
                 {
                     // Initializing year - use projected wins based on 10-year history
                     winsLookup = await CalculateProjectedWins(context, targetYear, token);
+                    lossesLookup = new Dictionary<int, int>(); // No losses at week 0
                 }
                 else
                 {
@@ -242,62 +244,78 @@ namespace NCAA_Power_Ratings.Services
                         return;
                     else
                     {
-                        // Week threshold or later - use current year wins
-                        winsLookup = await context.TeamRecords
+                        // Week threshold or later - use current year wins and losses
+                        var teamRecords = await context.TeamRecords
                             .Where(tr => tr.Year == targetYear)
-                            .ToDictionaryAsync(tr => tr.TeamID, tr => (int)tr.Wins, token);
+                            .ToDictionaryAsync(tr => tr.TeamID, token);
+
+                        winsLookup = teamRecords.ToDictionary(kvp => kvp.Key, kvp => (int)kvp.Value.Wins);
+                        lossesLookup = teamRecords.ToDictionary(kvp => kvp.Key, kvp => (int)kvp.Value.Losses);
                     }
 
                 }
 
                 // Step 2: GameParticipants - Union of games from winner and loser perspectives
-                var gamesFromWinner = context.Games
-                    .Where(g => g.Year == targetYear)
-                    .Select(g => new
+                // Include team divisions for cross-divisional penalty
+                var gamesFromWinner = from g in context.Games
+                    where g.Year == targetYear
+                    join t in context.Teams on g.WinnerId equals t.TeamID
+                    join opp in context.Teams on g.LoserId equals opp.TeamID
+                    select new
                     {
                         g.Year,
                         TeamId = g.WinnerId,
                         TeamName = g.WinnerName,
+                        TeamDivision = t.Division,
                         OpponentId = g.LoserId,
                         OpponentName = g.LoserName,
+                        OpponentDivision = opp.Division,
                         TeamPoints = g.WPoints,
                         OpponentPoints = g.LPoints,
                         g.Location,
                         IsHomeTeam = g.Location == 'W'
-                    });
+                    };
 
-                var gamesFromLoser = context.Games
-                    .Where(g => g.Year == targetYear)
-                    .Select(g => new
+                var gamesFromLoser = from g in context.Games
+                    where g.Year == targetYear
+                    join t in context.Teams on g.LoserId equals t.TeamID
+                    join opp in context.Teams on g.WinnerId equals opp.TeamID
+                    select new
                     {
                         g.Year,
                         TeamId = g.LoserId,
                         TeamName = g.LoserName,
+                        TeamDivision = t.Division,
                         OpponentId = g.WinnerId,
                         OpponentName = g.WinnerName,
+                        OpponentDivision = opp.Division,
                         TeamPoints = g.LPoints,
                         OpponentPoints = g.WPoints,
                         g.Location,
                         IsHomeTeam = g.Location == 'L'
-                    });
+                    };
 
                 var gameParticipants = await gamesFromWinner
                     .Union(gamesFromLoser)
                     .ToListAsync(token);
 
-                // Step 3: Assign wins to each game participant
+                // Step 3: Assign wins and losses to each game participant
                 var withRecords = gameParticipants
                     .Select(gp => new
                     {
                         gp.Year,
                         gp.TeamId,
                         gp.TeamName,
+                        gp.TeamDivision,
                         TeamWins = winsLookup.GetValueOrDefault(gp.TeamId, 0),
+                        TeamLosses = lossesLookup.GetValueOrDefault(gp.TeamId, 0),
                         gp.OpponentId,
                         gp.OpponentName,
+                        gp.OpponentDivision,
                         gp.TeamPoints,
                         gp.OpponentPoints,
                         OpponentWins = winsLookup.GetValueOrDefault(gp.OpponentId, 0),
+                        OpponentLosses = lossesLookup.GetValueOrDefault(gp.OpponentId, 0),
                         gp.Location,
                         gp.IsHomeTeam
                     })
@@ -312,11 +330,23 @@ namespace NCAA_Power_Ratings.Services
                     .Select(r =>
                     {
                         var delta = r.TeamPoints - r.OpponentPoints;
-                        var maxWins = Math.Max(r.TeamWins, r.OpponentWins);
-                        var minWins = Math.Min(r.TeamWins, r.OpponentWins);
+
+                        // Calculate win percentages (round to 0.05 increments for 5% buckets)
+                        var teamGamesPlayed = r.TeamWins + r.TeamLosses;
+                        var oppGamesPlayed = r.OpponentWins + r.OpponentLosses;
+
+                        var teamWinPct = teamGamesPlayed > 0 
+                            ? Math.Round((decimal)r.TeamWins / teamGamesPlayed * 20m, MidpointRounding.AwayFromZero) / 20m
+                            : 0m;
+                        var oppWinPct = oppGamesPlayed > 0 
+                            ? Math.Round((decimal)r.OpponentWins / oppGamesPlayed * 20m, MidpointRounding.AwayFromZero) / 20m
+                            : 0m;
+
+                        var maxWinPct = Math.Max(teamWinPct, oppWinPct);
+                        var minWinPct = Math.Min(teamWinPct, oppWinPct);
 
                         var asd = avgScoreDeltas.FirstOrDefault(a =>
-                            a.Team1Wins == maxWins && a.Team2Wins == minWins);
+                            a.Team1WinPct == maxWinPct && a.Team2WinPct == minWinPct);
 
                         double zValue = 0.0;
                         if (asd != null && asd.StDevP != 0)
@@ -325,7 +355,7 @@ namespace NCAA_Power_Ratings.Services
                             var expectedDelta = (double)asd.AverageScoreDelta;
 
                             // Adjust to team's perspective
-                            var expectedFromTeamPerspective = r.TeamWins >= r.OpponentWins
+                            var expectedFromTeamPerspective = teamWinPct >= oppWinPct
                                 ? expectedDelta
                                 : -expectedDelta;
 
@@ -369,9 +399,11 @@ namespace NCAA_Power_Ratings.Services
                             r.Year,
                             r.TeamId,
                             r.TeamName,
+                            r.TeamDivision,
                             r.TeamWins,
                             r.OpponentId,
                             r.OpponentName,
+                            r.OpponentDivision,
                             r.TeamPoints,
                             r.OpponentPoints,
                             Delta = delta,
@@ -380,7 +412,7 @@ namespace NCAA_Power_Ratings.Services
                     })
                     .ToList();
 
-                // Step 5: Assign weights based on Z-values
+                // Step 5: Assign weights based on Z-values and division
                 var withWeights = withDeltas
                     .Select(d => new
                     {
@@ -389,24 +421,30 @@ namespace NCAA_Power_Ratings.Services
                         d.TeamName,
                         d.OpponentId,
                         d.OpponentName,
+                        d.OpponentDivision,
                         Weight = d.ZValue switch
                         {
                             >= 1.0 => 1.25,
                             > -1.0 => 1.00,
                             > -2.0 => 0.75,
                             _ => 0.50
-                        }
+                        },
+                        // Division weight: FCS opponents count as 0.25, FBS as 1.0
+                        DivisionWeight = (d.OpponentDivision == "FCS") ? 0.25 : 1.0
                     })
                     .ToList();
 
-                // Step 6: Calculate BaseSOS per team
+                // Step 6: Calculate BaseSOS per team with division weighting
                 var baseSOS = withWeights
                     .GroupBy(w => new { w.Year, w.TeamId })
                     .Select(g => new
                     {
                         g.Key.Year,
                         g.Key.TeamId,
-                        BaseSOS = Math.Round(g.Sum(x => x.Weight) / g.Count(), 3),
+                        // Weighted by both game performance AND opponent division
+                        BaseSOS = Math.Round(
+                            g.Sum(x => x.Weight * x.DivisionWeight) / g.Sum(x => x.DivisionWeight), 
+                            3),
                         GamesPlayed = g.Count()
                     })
                     .ToList();
@@ -461,13 +499,16 @@ namespace NCAA_Power_Ratings.Services
                         c.TeamId,
                         c.BaseSOS,
                         c.SubSOS,
-                        CombinedSOS = Math.Round((2 * c.BaseSOS + c.SubSOS) / 3, 4)
+                        // Weighted 40% BaseSOS (direct opponents) + 60% SubSOS (opponents' schedules)
+                        // Emphasizes sustained schedule difficulty over isolated tough games
+                        CombinedSOS = Math.Round((2 * c.BaseSOS + 3 * c.SubSOS) / 5, 4)
                     })
                     .ToList();
 
                 // Step 10: Update TeamRecords
                 var teamRecordsToUpdate = await context.TeamRecords
                     .Where(tr => tr.Year == targetYear)
+                    .Include(tr => tr.Team)
                     .ToListAsync(token);
 
                 foreach (var record in teamRecordsToUpdate)
@@ -475,7 +516,14 @@ namespace NCAA_Power_Ratings.Services
                     var sosData = combined.FirstOrDefault(c =>
                         c.TeamId == record.TeamID && c.Year == record.Year);
 
-                    if (sosData != null)
+                    if (record.Team.Division == "FCS")
+                    {
+                        // FCS teams get NULL for SOS values
+                        record.BaseSOS = null;
+                        record.SubSOS = null;
+                        record.CombinedSOS = null;
+                    }
+                    else if (sosData != null)
                     {
                         record.BaseSOS = (decimal)sosData.BaseSOS;
                         record.SubSOS = (decimal)sosData.SubSOS;
@@ -503,42 +551,52 @@ namespace NCAA_Power_Ratings.Services
 
             var targetYear = year ?? DateTime.Now.Year;
 
-            // Step 1: Get all games for the year
-            var gamesFromWinner = context.Games
-                .Where(g => g.Year == targetYear)
-                .Select(g => new {
+            // Step 1: Get all games for the year with team divisions
+            var gamesFromWinner = from g in context.Games
+                where g.Year == targetYear
+                join t in context.Teams on g.WinnerId equals t.TeamID
+                join opp in context.Teams on g.LoserId equals opp.TeamID
+                select new {
                     g.Year,
                     TeamId = g.WinnerId,
                     TeamName = g.WinnerName,
+                    TeamDivision = t.Division,
                     OpponentId = g.LoserId,
+                    OpponentDivision = opp.Division,
                     TeamPoints = g.WPoints,
                     OpponentPoints = g.LPoints,
                     g.Location,
                     IsHomeTeam = g.Location == 'W'
-                });
+                };
 
-            var gamesFromLoser = context.Games
-                .Where(g => g.Year == targetYear)
-                .Select(g => new {
+            var gamesFromLoser = from g in context.Games
+                where g.Year == targetYear
+                join t in context.Teams on g.LoserId equals t.TeamID
+                join opp in context.Teams on g.WinnerId equals opp.TeamID
+                select new {
                     g.Year,
                     TeamId = g.LoserId,
                     TeamName = g.LoserName,
+                    TeamDivision = t.Division,
                     OpponentId = g.WinnerId,
+                    OpponentDivision = opp.Division,
                     TeamPoints = g.LPoints,
                     OpponentPoints = g.WPoints,
                     g.Location,
                     IsHomeTeam = g.Location == 'L'
-                });
+                };
 
             var gameParticipants = await gamesFromWinner
                 .Union(gamesFromLoser)
                 .ToListAsync(token);
 
-            // Step 2: Get wins lookup — use projected wins preseason, actual wins week 6+
-            // (reuse same logic as SetSOS — pass week if needed, for now default to actual)
-            var winsLookup = await context.TeamRecords
+            // Step 2: Get wins and losses lookup — use projected wins preseason, actual wins week 6+
+            var teamRecords = await context.TeamRecords
                 .Where(tr => tr.Year == targetYear)
-                .ToDictionaryAsync(tr => tr.TeamID, tr => (int)tr.Wins, token);
+                .ToDictionaryAsync(tr => tr.TeamID, token);
+
+            var winsLookup = teamRecords.ToDictionary(kvp => kvp.Key, kvp => (int)kvp.Value.Wins);
+            var lossesLookup = teamRecords.ToDictionary(kvp => kvp.Key, kvp => (int)kvp.Value.Losses);
 
             // Step 3: Load AvgScoreDeltas and MatchupHistory for rivalry adjustments
             var avgScoreDeltas = await context.AvgScoreDeltas.ToListAsync(token);
@@ -550,14 +608,28 @@ namespace NCAA_Power_Ratings.Services
             var zScores = gameParticipants
                 .Select(gp => {
                     var teamWins = winsLookup.GetValueOrDefault(gp.TeamId, 0);
+                    var teamLosses = lossesLookup.GetValueOrDefault(gp.TeamId, 0);
                     var oppWins = winsLookup.GetValueOrDefault(gp.OpponentId, 0);
-                    var maxWins = Math.Max(teamWins, oppWins);
-                    var minWins = Math.Min(teamWins, oppWins);
+                    var oppLosses = lossesLookup.GetValueOrDefault(gp.OpponentId, 0);
+
+                    // Calculate win percentages (round to 0.05 increments for 5% buckets)
+                    var teamGamesPlayed = teamWins + teamLosses;
+                    var oppGamesPlayed = oppWins + oppLosses;
+
+                    var teamWinPct = teamGamesPlayed > 0 
+                        ? Math.Round((decimal)teamWins / teamGamesPlayed * 20m, MidpointRounding.AwayFromZero) / 20m
+                        : 0m;
+                    var oppWinPct = oppGamesPlayed > 0 
+                        ? Math.Round((decimal)oppWins / oppGamesPlayed * 20m, MidpointRounding.AwayFromZero) / 20m
+                        : 0m;
+
+                    var maxWinPct = Math.Max(teamWinPct, oppWinPct);
+                    var minWinPct = Math.Min(teamWinPct, oppWinPct);
 
                     var delta = gp.TeamPoints - gp.OpponentPoints;
 
                     var asd = avgScoreDeltas.FirstOrDefault(
-                        a => a.Team1Wins == maxWins && a.Team2Wins == minWins);
+                        a => a.Team1WinPct == maxWinPct && a.Team2WinPct == minWinPct);
 
                     double zScore = 0.0;
                     if (asd != null && asd.StDevP != 0)
@@ -566,9 +638,9 @@ namespace NCAA_Power_Ratings.Services
                         var expectedDelta = (double)asd.AverageScoreDelta;
 
                         // Adjust expected to team's perspective:
-                        // - If team is favored (more wins): expect positive delta
-                        // - If team is underdog (fewer wins): expect negative delta
-                        var expectedFromTeamPerspective = teamWins >= oppWins 
+                        // - If team is favored (higher win%): expect positive delta
+                        // - If team is underdog (lower win%): expect negative delta
+                        var expectedFromTeamPerspective = teamWinPct >= oppWinPct 
                             ? expectedDelta 
                             : -expectedDelta;
 
@@ -607,29 +679,93 @@ namespace NCAA_Power_Ratings.Services
 
                         // Z-score: how much better/worse than expected
                         zScore = (delta - expectedFromTeamPerspective) / effectiveStDev;
+
+                        // Apply logarithmic dampening to compress extreme Z-scores
+                        // This reflects diminishing returns: a 20-point upset is impressive,
+                        // but a 40-point upset isn't twice as impressive
+                        if (zScore != 0)
+                        {
+                            var sign = Math.Sign(zScore);
+                            var magnitude = Math.Abs(zScore);
+                            zScore = sign * Math.Log(1 + magnitude);
+                        }
                     }
 
-                    return new { gp.TeamId, ZScore = zScore };
+                    // Division weight: FCS opponents count 0.25, FBS count 1.0
+                    var divisionWeight = (gp.OpponentDivision == "FCS") ? 0.25 : 1.0;
+
+                    return new { gp.TeamId, gp.TeamDivision, ZScore = zScore, DivisionWeight = divisionWeight };
                 })
                 .GroupBy(x => x.TeamId)
                 .Select(g => new {
                     TeamId = g.Key,
-                    AvgZScore = g.Average(x => x.ZScore)
+                    TeamDivision = g.First().TeamDivision,
+                    // Weighted average: FCS games count 0.25, FBS games count 1.0
+                    AvgZScore = g.Sum(x => x.ZScore * x.DivisionWeight) / g.Sum(x => x.DivisionWeight)
                 })
                 .ToList();
 
-            // Step 5: Multiply by CombinedSOS and store
+            // Step 5: Update PowerRating for all teams
+            var teamRecordsForUpdate = await context.TeamRecords
+                .Where(tr => tr.Year == targetYear)
+                .Include(tr => tr.Team)
+                .ToListAsync(token);
+
+            foreach (var record in teamRecordsForUpdate)
+            {
+                if (record.Team.Division == "FCS")
+                {
+                    // FCS teams get NULL for PowerRating
+                    record.PowerRating = null;
+                }
+                else
+                {
+                    // FBS teams get calculated PowerRating
+                    var zData = zScores.FirstOrDefault(z => z.TeamId == record.TeamID);
+                    if (zData != null)
+                    {
+                        var sos = (double)(record.CombinedSOS ?? 1.0m);
+                        record.PowerRating = (decimal)Math.Round(zData.AvgZScore * sos, 4);
+                    }
+                }
+            }
+
+            await context.SaveChangesAsync(token);
+        }
+
+        public async Task CalculateRankings(int targetYear, CancellationToken token = default)
+        {
+            using var context = await _contextFactory.CreateDbContextAsync(token);
+
+            // Get all team records for the target year with team info
             var teamRecords = await context.TeamRecords
                 .Where(tr => tr.Year == targetYear)
+                .Include(tr => tr.Team)
                 .ToListAsync(token);
 
             foreach (var record in teamRecords)
             {
-                var zData = zScores.FirstOrDefault(z => z.TeamId == record.TeamID);
-                if (zData != null)
+                if (record.Team.Division == "FCS")
                 {
-                    var sos = (double)(record.CombinedSOS ?? 1.0m);
-                    record.PowerRating = (decimal)Math.Round(zData.AvgZScore * sos, 4);
+                    // FCS teams get NULL for Ranking (no meaningful PR/SOS)
+                    record.Ranking = null;
+                }
+                else
+                {
+                    // FBS teams: Ranking = WinPct × CombinedSOS × (1 + PowerRating)
+                    var totalGames = record.Wins + record.Losses;
+                    if (totalGames > 0 && record.CombinedSOS.HasValue && record.PowerRating.HasValue)
+                    {
+                        var winPct = (decimal)record.Wins / totalGames;
+                        var sos = record.CombinedSOS.Value;
+                        var pr = record.PowerRating.Value;
+
+                        record.Ranking = Math.Round(winPct * sos * (1 + pr), 4);
+                    }
+                    else
+                    {
+                        record.Ranking = null;
+                    }
                 }
             }
 

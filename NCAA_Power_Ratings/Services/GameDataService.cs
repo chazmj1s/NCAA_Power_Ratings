@@ -554,6 +554,12 @@ namespace NCAA_Power_Ratings.Services
             catch (Exception ex)
             {
                 Console.WriteLine($"Error updating team records: {ex.Message}");
+                Console.WriteLine($"Stack trace: {ex.StackTrace}");
+                if (ex.InnerException != null)
+                {
+                    Console.WriteLine($"Inner exception: {ex.InnerException.Message}");
+                }
+                throw; // Re-throw so the controller can log it properly
             }
         }
 
