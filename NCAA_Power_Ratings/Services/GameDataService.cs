@@ -137,6 +137,7 @@ namespace NCAA_Power_Ratings.Services
 
             List<Game> scrapedGames;
             bool usedLocalFile = false;
+            string? actualFileUsed = null;
 
             try
             {
@@ -152,11 +153,47 @@ namespace NCAA_Power_Ratings.Services
 
                 // Try to fall back to local file
                 var dataDirectory = _configuration.GetValue<string>("CustomSettings:FilePath", "NCAA Raw Game Data");
-                var filePath = Path.Combine(dataDirectory, $"{year}.txt");
 
-                if (File.Exists(filePath))
+                // First, check if the requested year file exists
+                var requestedFilePath = Path.Combine(dataDirectory, $"{year}.txt");
+                string? fileToUse = null;
+
+                if (File.Exists(requestedFilePath))
                 {
-                    Console.WriteLine($"Falling back to local file: {filePath}");
+                    fileToUse = requestedFilePath;
+                    Console.WriteLine($"Found data file for requested year {year}");
+                }
+                else
+                {
+                    Console.WriteLine($"Data file not found for year {year}: {requestedFilePath}");
+
+                    // Look for the most recent year file
+                    if (Directory.Exists(dataDirectory))
+                    {
+                        var yearFiles = Directory.GetFiles(dataDirectory, "*.txt")
+                            .Select(f => new
+                            {
+                                FilePath = f,
+                                FileName = Path.GetFileNameWithoutExtension(f),
+                                Year = int.TryParse(Path.GetFileNameWithoutExtension(f), out int y) ? y : (int?)null
+                            })
+                            .Where(f => f.Year.HasValue)
+                            .OrderByDescending(f => f.Year)
+                            .ToList();
+
+                        if (yearFiles.Any())
+                        {
+                            var mostRecentFile = yearFiles.First();
+                            fileToUse = mostRecentFile.FilePath;
+                            Console.WriteLine($"WARNING: Year {year} file not found. Falling back to most recent year file: {mostRecentFile.Year}.txt");
+                            Console.WriteLine($"Note: This may not contain games for year {year} week {week}. Consider performing a manual scrape to initialize year {year}.");
+                        }
+                    }
+                }
+
+                if (!string.IsNullOrEmpty(fileToUse))
+                {
+                    Console.WriteLine($"Using local file: {fileToUse}");
 
                     try
                     {
@@ -164,7 +201,7 @@ namespace NCAA_Power_Ratings.Services
                         scrapedGames = new List<Game>();
 
                         // Read games from the file
-                        await foreach (var recordInfo in ReadRecordsFromFileAsync(filePath, token))
+                        await foreach (var recordInfo in ReadRecordsFromFileAsync(fileToUse, token))
                         {
                             if (recordInfo.Fields.Length >= 9)
                             {
@@ -174,7 +211,8 @@ namespace NCAA_Power_Ratings.Services
                         }
 
                         usedLocalFile = true;
-                        Console.WriteLine($"Successfully loaded {scrapedGames.Count} games from local file");
+                        actualFileUsed = Path.GetFileName(fileToUse);
+                        Console.WriteLine($"Successfully loaded {scrapedGames.Count} games from local file: {actualFileUsed}");
                     }
                     catch (Exception fileEx)
                     {
@@ -187,9 +225,9 @@ namespace NCAA_Power_Ratings.Services
                 }
                 else
                 {
-                    Console.WriteLine($"Local file not found: {filePath}");
+                    Console.WriteLine($"No data files found in directory: {dataDirectory}");
                     throw new InvalidOperationException(
-                        $"Web scraping failed and no local file found at {filePath}. " +
+                        $"Web scraping failed and no local data files found in {dataDirectory}. " +
                         $"Please perform a manual scrape to initialize year {year}. " +
                         $"Error: {ex.Message}", ex);
                 }
@@ -207,7 +245,10 @@ namespace NCAA_Power_Ratings.Services
 
                 if (weekGames.Count == 0)
                 {
-                    Console.WriteLine($"No games found for year {year}, week {week}.");
+                    var message = usedLocalFile 
+                        ? $"No games found for year {year}, week {week} in file {actualFileUsed}. The file may not contain data for this year/week combination."
+                        : $"No games found for year {year}, week {week}.";
+                    Console.WriteLine(message);
                     return 0;
                 }
 
@@ -241,7 +282,7 @@ namespace NCAA_Power_Ratings.Services
 
                 int changes = await context.SaveChangesAsync(token);
 
-                var source = usedLocalFile ? "local file" : "web scraping";
+                var source = usedLocalFile ? $"local file ({actualFileUsed})" : "web scraping";
                 Console.WriteLine($"Processed {year}-W{week} from {source}: added {added}, updated {updated}, total changes {changes}");
 
                 return added + updated;
