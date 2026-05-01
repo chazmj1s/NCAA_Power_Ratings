@@ -264,6 +264,17 @@ namespace NCAA_Power_Ratings.Services
             predictedTeamScore *= weekMultiplier;
             predictedOppScore *= weekMultiplier;
 
+            // Apply dynamic scoring adjustment based on game context
+            var scoringAdjustment = CalculateScoringAdjustment(
+                teamRecord, 
+                oppRecord, 
+                rivalry, 
+                week
+            );
+
+            predictedTeamScore *= scoringAdjustment;
+            predictedOppScore *= scoringAdjustment;
+
             // Ensure scores never go negative (floor at 0)
             predictedTeamScore = Math.Max(0, predictedTeamScore);
             predictedOppScore = Math.Max(0, predictedOppScore);
@@ -307,6 +318,48 @@ namespace NCAA_Power_Ratings.Services
             if (adjustedStDev < 14) return "Medium";
             if (adjustedStDev < 18) return "Low";
             return "Very Low";
+        }
+
+        /// <summary>
+        /// Calculates dynamic scoring adjustment based on game context.
+        /// Returns a multiplier to apply to predicted scores (e.g., 0.92 = 8% reduction).
+        /// </summary>
+        private double CalculateScoringAdjustment(
+            TeamRecord teamRecord,
+            TeamRecord oppRecord,
+            MatchupHistory rivalry,
+            int week)
+        {
+            double adjustment = 1.0;
+
+            // 1. Rivalry game defensive intensity
+            if (rivalry != null)
+            {
+                adjustment *= rivalry.RivalryTier switch
+                {
+                    "EPIC" => 0.90,      // Epic rivalries: 10% lower scoring
+                    "NATIONAL" => 0.93,  // National rivalries: 7% lower scoring
+                    "STATE" => 0.95,     // State rivalries: 5% lower scoring
+                    _ => 1.0
+                };
+            }
+
+            // 2. Top-25 matchup (both teams ranked)
+            if (teamRecord.Ranking.HasValue && teamRecord.Ranking <= 25 &&
+                oppRecord.Ranking.HasValue && oppRecord.Ranking <= 25)
+            {
+                // Big games tend to be defensive battles
+                adjustment *= 0.95; // Additional 5% reduction
+            }
+
+            // 3. Championship week intensity
+            if (week >= 15)
+            {
+                // Conference championships and playoffs: tighter defense
+                adjustment *= 0.93; // Additional 7% reduction
+            }
+
+            return adjustment;
         }
     }
 
