@@ -105,6 +105,55 @@ namespace NCAA_Power_Ratings.Controllers
         }
 
         /// <summary>
+        /// Diagnostic endpoint to check database data availability
+        /// GET /api/productiongamedata/diagnostic
+        /// </summary>
+        [HttpGet("diagnostic")]
+        public async Task<IActionResult> GetDiagnostic()
+        {
+            try
+            {
+                await using var context = await contextFactory.CreateDbContextAsync();
+
+                var totalTeams = await context.Teams.CountAsync();
+                var totalGames = await context.Games.CountAsync();
+                var totalRecords = await context.TeamRecords.CountAsync();
+                var recordsWithPowerRating = await context.TeamRecords.CountAsync(tr => tr.PowerRating.HasValue);
+
+                var years = await context.TeamRecords
+                    .Where(tr => tr.PowerRating.HasValue)
+                    .Select(tr => tr.Year)
+                    .Distinct()
+                    .OrderBy(y => y)
+                    .ToListAsync();
+
+                var yearStats = new List<object>();
+                foreach (var year in years)
+                {
+                    var count = await context.TeamRecords
+                        .CountAsync(tr => tr.Year == year && tr.PowerRating.HasValue);
+                    yearStats.Add(new { year, teamsWithRankings = count });
+                }
+
+                return Ok(new
+                {
+                    database = "Connected",
+                    totalTeams,
+                    totalGames,
+                    totalRecords,
+                    recordsWithPowerRating,
+                    yearsWithData = years,
+                    yearStats
+                });
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "Error getting diagnostic info");
+                return StatusCode(500, ex.Message);
+            }
+        }
+
+        /// <summary>
         /// Query team records with filters for wins, losses, year range, and PowerRating range.
         /// Example: GET /api/productiongamedata/queryTeamRecords?wins=13&losses=3
         /// Example: GET /api/productiongamedata/queryTeamRecords?minPowerRating=-0.02&maxPowerRating=0.01
@@ -298,6 +347,55 @@ namespace NCAA_Power_Ratings.Controllers
             {
                 logger.LogError(ex, "Error querying rivalries");
                 return StatusCode(500, "An error occurred while querying rivalries.");
+            }
+        }
+
+        /// <summary>
+        /// Get power rankings for a specific year.
+        /// Example: GET /api/productiongamedata/powerrankings?year=2025
+        /// </summary>
+        [HttpGet("powerrankings")]
+        public async Task<IActionResult> GetPowerRankings([FromQuery] int? year)
+        {
+            try
+            {
+                var targetYear = year ?? DateTime.Now.Year;
+
+                await using var context = await contextFactory.CreateDbContextAsync();
+
+                // Load data first, then order in memory (SQLite doesn't support ordering by decimal)
+                var teamRecords = await context.TeamRecords
+                    .Include(tr => tr.Team)
+                    .Where(tr => tr.Year == targetYear && tr.Ranking.HasValue)
+                    .ToListAsync();
+
+                var rankings = teamRecords
+                    .OrderByDescending(tr => tr.Ranking)
+                    .Select((tr, index) => new
+                    {
+                        TeamID = tr.TeamID,
+                        TeamName = tr.Team!.TeamName,
+                        Conference = tr.Team.Conference,
+                        ConferenceAbbr = tr.Team.ConferenceAbbr,
+                        Division = tr.Team.Division,
+                        Rank = index + 1,
+                        Ranking = tr.Ranking,
+                        Year = tr.Year,
+                        Wins = tr.Wins,
+                        Losses = tr.Losses,
+                        BaseSOS = tr.BaseSOS,
+                        CombinedSOS = tr.CombinedSOS
+                    })
+                    .ToList();
+
+                logger.LogInformation("Found {Count} teams with power ratings for year {Year}", rankings.Count, targetYear);
+
+                return Ok(rankings);
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "Error retrieving power rankings");
+                return StatusCode(500, "An error occurred while retrieving power rankings.");
             }
         }
     }

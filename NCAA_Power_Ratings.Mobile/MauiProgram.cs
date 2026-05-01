@@ -1,4 +1,11 @@
 ﻿using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Maui;
+using Microsoft.Maui.Hosting;
+using Microsoft.Maui.Controls.Hosting;
+using NCAA_Power_Ratings.Mobile.Services;
+using NCAA_Power_Ratings.Mobile.ViewModels;
+using NCAA_Power_Ratings.Mobile.Views;
 
 namespace NCAA_Power_Ratings.Mobile;
 
@@ -14,6 +21,30 @@ public static class MauiProgram
 				fonts.AddFont("OpenSans-Regular.ttf", "OpenSansRegular");
 				fonts.AddFont("OpenSans-Semibold.ttf", "OpenSansSemibold");
 			});
+
+		// Register HttpClient
+		builder.Services.AddHttpClient();
+
+		// Register Services with HttpClient factory
+		builder.Services.AddSingleton<GameDataApiService>(sp => 
+		{
+			var httpClientFactory = sp.GetRequiredService<IHttpClientFactory>();
+			var httpClient = httpClientFactory.CreateClient();
+			return new GameDataApiService(httpClient);
+		});
+
+		builder.Services.AddSingleton<PredictionApiService>(sp => 
+		{
+			var httpClientFactory = sp.GetRequiredService<IHttpClientFactory>();
+			var httpClient = httpClientFactory.CreateClient();
+			return new PredictionApiService(httpClient);
+		});
+
+		// Register ViewModels
+		builder.Services.AddTransient<PowerRankingsViewModel>();
+
+		// Register Pages
+		builder.Services.AddTransient<PowerRankingsPage>();
 
 #if DEBUG
 		builder.Logging.AddDebug();

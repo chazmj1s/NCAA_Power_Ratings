@@ -1,4 +1,6 @@
-﻿namespace NCAA_Power_Ratings.Mobile;
+﻿using Microsoft.Maui.Controls;
+
+namespace NCAA_Power_Ratings.Mobile;
 
 public partial class AppShell : Shell
 {
