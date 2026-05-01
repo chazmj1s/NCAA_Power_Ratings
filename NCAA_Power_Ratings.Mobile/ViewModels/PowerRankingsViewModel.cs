@@ -215,6 +215,9 @@ namespace NCAA_Power_Ratings.Mobile.ViewModels
                 RankingFilter.Top25 => filtered.Where(t => t.IsTop25),
                 RankingFilter.Conference when SelectedConference != "All" =>
                     filtered.Where(t => t.ConferenceAbbr == SelectedConference),
+                RankingFilter.P4 => filtered.Where(t => t.Tier == "P4"),
+                RankingFilter.G5 => filtered.Where(t => t.Tier == "G5"),
+                RankingFilter.Independent => filtered.Where(t => t.Tier == "Independent"),
                 _ => filtered
             };
 
@@ -239,6 +242,12 @@ namespace NCAA_Power_Ratings.Mobile.ViewModels
                 RankingSort.SOS => _isSortAscending
                     ? filtered.OrderBy(t => t.CombinedSOS ?? 0)
                     : filtered.OrderByDescending(t => t.CombinedSOS ?? 0),
+                RankingSort.TierRank => _isSortAscending
+                    ? filtered.OrderBy(t => t.TierRank)
+                    : filtered.OrderByDescending(t => t.TierRank),
+                RankingSort.Tier => _isSortAscending
+                    ? filtered.OrderBy(t => t.Tier).ThenBy(t => t.TierRank)
+                    : filtered.OrderByDescending(t => t.Tier).ThenBy(t => t.TierRank),
                 _ => filtered.OrderBy(t => t.Rank)
             };
 

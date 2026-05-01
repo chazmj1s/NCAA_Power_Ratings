@@ -8,7 +8,10 @@ namespace NCAA_Power_Ratings.Mobile.Models
         All,
         Top25,
         Conference,
-        Division
+        Division,
+        P4,         // Power 4 conferences only
+        G5,         // Group of 5 conferences only
+        Independent // Independent teams
     }
 
     /// <summary>
@@ -16,11 +19,13 @@ namespace NCAA_Power_Ratings.Mobile.Models
     /// </summary>
     public enum RankingSort
     {
-        Rank,
+        Rank,           // Overall rank
         TeamName,
         PowerRating,
         Record,
         Conference,
-        SOS
+        SOS,
+        TierRank,       // Rank within tier (P4/G5)
+        Tier            // Group by tier
     }
 }

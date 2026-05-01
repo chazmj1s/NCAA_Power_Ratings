@@ -369,22 +369,64 @@ namespace NCAA_Power_Ratings.Controllers
                     .Where(tr => tr.Year == targetYear && tr.Ranking.HasValue)
                     .ToListAsync();
 
-                var rankings = teamRecords
-                    .OrderByDescending(tr => tr.Ranking)
-                    .Select((tr, index) => new
+                // Add conference tier to each team
+                var teamsWithTiers = teamRecords
+                    .Select(tr => new
                     {
-                        TeamID = tr.TeamID,
-                        TeamName = tr.Team!.TeamName,
-                        Conference = tr.Team.Conference,
-                        ConferenceAbbr = tr.Team.ConferenceAbbr,
-                        Division = tr.Team.Division,
-                        Rank = index + 1,
-                        Ranking = tr.Ranking,
-                        Year = tr.Year,
-                        Wins = tr.Wins,
-                        Losses = tr.Losses,
-                        BaseSOS = tr.BaseSOS,
-                        CombinedSOS = tr.CombinedSOS
+                        TeamRecord = tr,
+                        Tier = GetConferenceTier(tr.Team?.Conference)
+                    })
+                    .OrderByDescending(t => t.TeamRecord.Ranking)
+                    .ToList();
+
+                // Calculate overall rank (all teams)
+                var withOverallRank = teamsWithTiers
+                    .Select((t, index) => new
+                    {
+                        t.TeamRecord,
+                        t.Tier,
+                        OverallRank = index + 1
+                    })
+                    .ToList();
+
+                // Group by tier and calculate tier-specific ranks
+                var tierGroups = withOverallRank.GroupBy(t => t.Tier).ToList();
+
+                // Dictionary to hold tier ranks
+                var tierRankLookup = new Dictionary<int, int>(); // TeamID -> TierRank
+
+                foreach (var tierGroup in tierGroups)
+                {
+                    var tieredTeams = tierGroup
+                        .OrderByDescending(t => t.TeamRecord.Ranking)
+                        .Select((t, index) => new { t.TeamRecord.TeamID, TierRank = index + 1 })
+                        .ToList();
+
+                    foreach (var team in tieredTeams)
+                    {
+                        tierRankLookup[team.TeamID] = team.TierRank;
+                    }
+                }
+
+                // Build final rankings list
+                var rankings = withOverallRank
+                    .OrderByDescending(t => t.TeamRecord.Ranking)
+                    .Select(t => new
+                    {
+                        TeamID = t.TeamRecord.TeamID,
+                        TeamName = t.TeamRecord.Team!.TeamName,
+                        Conference = t.TeamRecord.Team.Conference,
+                        ConferenceAbbr = t.TeamRecord.Team.ConferenceAbbr,
+                        Division = t.TeamRecord.Team.Division,
+                        Tier = t.Tier,
+                        OverallRank = t.OverallRank,                        // Rank among ALL teams
+                        TierRank = tierRankLookup[t.TeamRecord.TeamID],    // Rank within tier (P4, G5, etc.)
+                        Ranking = t.TeamRecord.Ranking,
+                        Year = t.TeamRecord.Year,
+                        Wins = t.TeamRecord.Wins,
+                        Losses = t.TeamRecord.Losses,
+                        BaseSOS = t.TeamRecord.BaseSOS,
+                        CombinedSOS = t.TeamRecord.CombinedSOS
                     })
                     .ToList();
 
@@ -397,6 +439,41 @@ namespace NCAA_Power_Ratings.Controllers
                 logger.LogError(ex, "Error retrieving power rankings");
                 return StatusCode(500, "An error occurred while retrieving power rankings.");
             }
+        }
+
+        /// <summary>
+        /// Determines the conference tier for rankings.
+        /// P4 = Power 4 conferences (SEC, Big Ten, Big 12, ACC)
+        /// G5 = Group of 5 conferences (American, Mountain West, Sun Belt, MAC, C-USA)
+        /// </summary>
+        private static string GetConferenceTier(string? conference)
+        {
+            if (string.IsNullOrEmpty(conference))
+                return "Other";
+
+            // Power 4 conferences
+            var power4 = new[] { "SEC", "Big Ten", "Big 12", "ACC" };
+            if (power4.Any(p4 => conference.Contains(p4, StringComparison.OrdinalIgnoreCase)))
+                return "P4";
+
+            // Group of 5 conferences
+            var group5 = new[] 
+            { 
+                "American Athletic", "American", "AAC",
+                "Mountain West", 
+                "Sun Belt", 
+                "Mid-American", "MAC",
+                "Conference USA", "C-USA",
+                "Pac-12" // Remaining Pac-12 teams (mostly moved to other conferences)
+            };
+            if (group5.Any(g5 => conference.Contains(g5, StringComparison.OrdinalIgnoreCase)))
+                return "G5";
+
+            // Independent teams (Notre Dame, etc.)
+            if (conference.Contains("Independent", StringComparison.OrdinalIgnoreCase))
+                return "Independent";
+
+            return "Other";
         }
     }
 
