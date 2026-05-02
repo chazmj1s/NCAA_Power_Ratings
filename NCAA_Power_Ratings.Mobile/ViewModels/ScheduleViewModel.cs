@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
 using System.Windows.Input;
+using NCAA_Power_Ratings.Mobile.Helpers;
 using NCAA_Power_Ratings.Mobile.Models;
 using NCAA_Power_Ratings.Mobile.Services;
 
@@ -149,12 +150,16 @@ namespace NCAA_Power_Ratings.Mobile.ViewModels
             // Conference / tier filter
             filtered = _activeFilter switch
             {
-                "All" => filtered,
-                "P4"  => filtered.Where(g => g.WinnerTier == "P4" || g.LoserTier == "P4"),
-                "G5"  => filtered.Where(g => g.WinnerTier == "G5" || g.LoserTier == "G5"),
-                _     => filtered.Where(g =>
-                    g.WinnerConf.Equals(_activeFilter, StringComparison.OrdinalIgnoreCase) ||
-                    g.LoserConf.Equals(_activeFilter,  StringComparison.OrdinalIgnoreCase))
+                "All"      => filtered,
+                "P4"       => filtered.Where(g => g.WinnerTier == "P4" || g.LoserTier == "P4"),
+                "G5"       => filtered.Where(g => g.WinnerTier == "G5" || g.LoserTier == "G5"),
+                "── Conf ──" => filtered,
+                _          => filtered.Where(g =>
+                {
+                    var abbr = ConferenceHelper.DisplayToAbbr(_activeFilter);
+                    return g.WinnerConf.Equals(abbr, StringComparison.OrdinalIgnoreCase) ||
+                           g.LoserConf.Equals(abbr,  StringComparison.OrdinalIgnoreCase);
+                })
             };
 
             // Team filter

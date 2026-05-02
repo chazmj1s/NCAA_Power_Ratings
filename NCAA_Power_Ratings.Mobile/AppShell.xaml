@@ -21,6 +21,12 @@
             Route="PowerRankingsPage" />
 
         <ShellContent
+            Title="Teams"
+            Icon="people.png"
+            ContentTemplate="{DataTemplate views:TeamsPage}"
+            Route="TeamsPage" />
+
+        <ShellContent
             Title="Home"
             Icon="home.png"
             ContentTemplate="{DataTemplate local:MainPage}"

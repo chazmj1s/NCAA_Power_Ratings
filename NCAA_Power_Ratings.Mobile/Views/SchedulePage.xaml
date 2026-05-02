@@ -48,16 +48,16 @@
                     <x:String>All</x:String>
                     <x:String>P4</x:String>
                     <x:String>G5</x:String>
-                    <x:String>── Conference ──</x:String>
-                    <x:String>SEC</x:String>
-                    <x:String>Big Ten</x:String>
-                    <x:String>Big 12</x:String>
+                    <x:String>── Conf ──</x:String>
                     <x:String>ACC</x:String>
+                    <x:String>Big 12</x:String>
+                    <x:String>Big Ten</x:String>
+                    <x:String>SEC</x:String>
                     <x:String>AAC</x:String>
+                    <x:String>Conf USA</x:String>
+                    <x:String>MAC</x:String>
                     <x:String>Mtn West</x:String>
                     <x:String>Sun Belt</x:String>
-                    <x:String>MAC</x:String>
-                    <x:String>Conf USA</x:String>
                     <x:String>Independent</x:String>
                 </Picker.Items>
             </Picker>

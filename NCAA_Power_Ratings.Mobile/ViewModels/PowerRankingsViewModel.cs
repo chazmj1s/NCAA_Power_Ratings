@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
 using System.Windows.Input;
+using NCAA_Power_Ratings.Mobile.Helpers;
 using NCAA_Power_Ratings.Mobile.Models;
 using NCAA_Power_Ratings.Mobile.Services;
 
@@ -36,11 +37,7 @@ namespace NCAA_Power_Ratings.Mobile.ViewModels
             RefreshCommand = new Microsoft.Maui.Controls.Command(async () => await RefreshDataAsync());
 
             // Available conferences for filtering
-            Conferences = new ObservableCollection<string>
-            {
-                "All", "SEC", "Big Ten", "Big 12", "ACC", "Pac-12", "AAC", "Mountain West",
-                "Sun Belt", "MAC", "Conference USA", "Independent"
-            };
+            Conferences = new ObservableCollection<string>(ConferenceHelper.FilterDisplayList());
         }
 
         #region Properties
@@ -201,9 +198,9 @@ namespace NCAA_Power_Ratings.Mobile.ViewModels
                     _currentFilter = RankingFilter.Independent;
                     break;
                 default:
-                    // Treat unknown values as a specific conference name
+                    // Translate display name → ConferenceAbbr
                     _currentFilter = RankingFilter.Conference;
-                    _selectedConferenceFilter = filterType;
+                    _selectedConferenceFilter = ConferenceHelper.DisplayToAbbr(filterType);
                     break;
             }
 
