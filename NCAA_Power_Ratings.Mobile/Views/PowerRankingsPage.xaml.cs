@@ -6,41 +6,53 @@ namespace NCAA_Power_Ratings.Mobile.Views
     public partial class PowerRankingsPage : ContentPage
     {
         private PowerRankingsViewModel ViewModel => (PowerRankingsViewModel)BindingContext;
+        private bool _pickersReady = false;
 
         public PowerRankingsPage(PowerRankingsViewModel viewModel)
         {
             InitializeComponent();
             BindingContext = viewModel;
 
-            // Set the initial year picker selection to 2025
-            var yearIndex = 2025 - 2021; // 2021 is index 0
+            var yearIndex = 2025 - 2021;
             if (yearIndex >= 0 && yearIndex < YearPicker.Items.Count)
-            {
                 YearPicker.SelectedIndex = yearIndex;
-            }
+
+            FilterPicker.SelectedIndex = 0;
+            _pickersReady = true;
         }
 
         protected override async void OnAppearing()
         {
             base.OnAppearing();
-
-            // Load data when page appears
             if (BindingContext is PowerRankingsViewModel viewModel)
-            {
                 await viewModel.LoadDataAsync();
-            }
         }
 
         private void OnYearChanged(object sender, EventArgs e)
         {
+            if (!_pickersReady) return;
             if (sender is Picker picker && picker.SelectedIndex >= 0)
-            {
-                var yearString = picker.Items[picker.SelectedIndex];
-                if (int.TryParse(yearString, out int year))
-                {
+                if (int.TryParse(picker.Items[picker.SelectedIndex], out int year))
                     ViewModel.SelectedYear = year;
-                }
-            }
+        }
+
+        private void OnFilterChanged(object sender, EventArgs e)
+        {
+            if (!_pickersReady) return;
+            if (sender is not Picker picker || picker.SelectedIndex < 0) return;
+
+            var selected = picker.Items[picker.SelectedIndex];
+
+            // Ignore separator rows
+            if (selected.StartsWith("\u2500")) return;
+
+            var filterParam = selected switch
+            {
+                "Top 25"     => "Top25",
+                _            => selected   // All, P4, G5, conference abbrs, Independent pass through
+            };
+
+            ViewModel.ApplyFilter(filterParam);
         }
     }
 }

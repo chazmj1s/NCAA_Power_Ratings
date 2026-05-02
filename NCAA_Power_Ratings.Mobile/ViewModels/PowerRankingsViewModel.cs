@@ -18,9 +18,10 @@ namespace NCAA_Power_Ratings.Mobile.ViewModels
         private bool _isBusy;
         private string _selectedConference = "All";
         private RankingFilter _currentFilter = RankingFilter.All;
-        private RankingSort _currentSort = RankingSort.Rank;
-        private bool _isSortAscending = true;
+        private RankingSort _currentSort = RankingSort.PowerRating;
+        private bool _isSortAscending = false; // PowerRating defaults descending (highest = #1)
         private int _selectedYear;
+        private string _selectedConferenceFilter = "All";
 
         public PowerRankingsViewModel(GameDataApiService apiService)
         {
@@ -86,6 +87,38 @@ namespace NCAA_Power_Ratings.Mobile.ViewModels
 
         public string StatusMessage { get; private set; } = "Loading...";
 
+        /// <summary>Header label for the dynamic sort column shown in the list.</summary>
+        public string ActiveSortLabel => _currentSort switch
+        {
+            RankingSort.PowerRating => "Rating",
+            RankingSort.SOS        => "SOS",
+            RankingSort.Record     => "Record",
+            RankingSort.TierRank   => "Tier",
+            RankingSort.Rank       => "Rank",
+            _                      => "Rating"
+        };
+
+        /// <summary>Returns the display value for the active sort column for a given team.</summary>
+        public string GetActiveSortValue(TeamRanking t) => _currentSort switch
+        {
+            RankingSort.PowerRating => t.DisplayRanking,
+            RankingSort.SOS        => t.DisplaySOS,
+            RankingSort.Record     => t.Record,
+            RankingSort.TierRank   => t.DisplayTierWithRank,
+            RankingSort.Rank       => t.DisplayRank,
+            _                      => t.DisplayRanking
+        };
+
+        public string SelectedConferenceFilter
+        {
+            get => _selectedConferenceFilter;
+            set
+            {
+                _selectedConferenceFilter = value;
+                OnPropertyChanged();
+            }
+        }
+
         #endregion
 
         #region Commands
@@ -150,12 +183,27 @@ namespace NCAA_Power_Ratings.Mobile.ViewModels
             {
                 case "All":
                     _currentFilter = RankingFilter.All;
+                    _selectedConferenceFilter = "All";
                     break;
                 case "Top25":
                     _currentFilter = RankingFilter.Top25;
                     break;
                 case "Conference":
                     _currentFilter = RankingFilter.Conference;
+                    break;
+                case "P4":
+                    _currentFilter = RankingFilter.P4;
+                    break;
+                case "G5":
+                    _currentFilter = RankingFilter.G5;
+                    break;
+                case "Independent":
+                    _currentFilter = RankingFilter.Independent;
+                    break;
+                default:
+                    // Treat unknown values as a specific conference name
+                    _currentFilter = RankingFilter.Conference;
+                    _selectedConferenceFilter = filterType;
                     break;
             }
 
@@ -165,6 +213,7 @@ namespace NCAA_Power_Ratings.Mobile.ViewModels
         public void ApplySort(RankingSort sortType)
         {
             _currentSort = sortType;
+            OnPropertyChanged(nameof(ActiveSortLabel));
             ApplyFiltersAndSort();
         }
 
@@ -181,6 +230,8 @@ namespace NCAA_Power_Ratings.Mobile.ViewModels
                 "Rating" => RankingSort.PowerRating,
                 "Conference" => RankingSort.Conference,
                 "SOS" => RankingSort.SOS,
+                "TierRank" => RankingSort.TierRank,
+                "Tier" => RankingSort.Tier,
                 _ => RankingSort.Rank
             };
 
@@ -202,6 +253,7 @@ namespace NCAA_Power_Ratings.Mobile.ViewModels
             }
 
             ApplyFiltersAndSort();
+            OnPropertyChanged(nameof(ActiveSortLabel));
         }
 
         private void ApplyFiltersAndSort()
@@ -213,8 +265,12 @@ namespace NCAA_Power_Ratings.Mobile.ViewModels
             filtered = _currentFilter switch
             {
                 RankingFilter.Top25 => filtered.Where(t => t.IsTop25),
-                RankingFilter.Conference when SelectedConference != "All" =>
-                    filtered.Where(t => t.ConferenceAbbr == SelectedConference),
+                RankingFilter.Conference when _selectedConferenceFilter != "All" =>
+                    filtered.Where(t =>
+                        (t.ConferenceAbbr != null &&
+                            t.ConferenceAbbr.Equals(_selectedConferenceFilter, StringComparison.OrdinalIgnoreCase)) ||
+                        (t.Conference != null &&
+                            t.Conference.Equals(_selectedConferenceFilter, StringComparison.OrdinalIgnoreCase))),
                 RankingFilter.P4 => filtered.Where(t => t.Tier == "P4"),
                 RankingFilter.G5 => filtered.Where(t => t.Tier == "G5"),
                 RankingFilter.Independent => filtered.Where(t => t.Tier == "Independent"),
@@ -251,7 +307,11 @@ namespace NCAA_Power_Ratings.Mobile.ViewModels
                 _ => filtered.OrderBy(t => t.Rank)
             };
 
-            FilteredTeams = new ObservableCollection<TeamRanking>(sorted);
+            var result = sorted.ToList();
+            foreach (var team in result)
+                team.ActiveSortValue = GetActiveSortValue(team);
+
+            FilteredTeams = new ObservableCollection<TeamRanking>(result);
         }
 
         #endregion
