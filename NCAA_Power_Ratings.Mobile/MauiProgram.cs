@@ -42,9 +42,11 @@ public static class MauiProgram
 
 		// Register ViewModels
 		builder.Services.AddTransient<PowerRankingsViewModel>();
+		builder.Services.AddTransient<ScheduleViewModel>();
 
 		// Register Pages
 		builder.Services.AddTransient<PowerRankingsPage>();
+		builder.Services.AddTransient<SchedulePage>();
 
 #if DEBUG
 		builder.Logging.AddDebug();

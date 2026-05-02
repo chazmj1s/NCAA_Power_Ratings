@@ -1,0 +1,165 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             xmlns:vm="clr-namespace:NCAA_Power_Ratings.Mobile.ViewModels"
+             xmlns:models="clr-namespace:NCAA_Power_Ratings.Mobile.Models"
+             x:Class="NCAA_Power_Ratings.Mobile.Views.SchedulePage"
+             Title="Games">
+
+    <Grid RowDefinitions="38,*,24">
+
+        <!-- Header Bar -->
+        <Grid Grid.Row="0"
+              Padding="6,0"
+              HeightRequest="38"
+              BackgroundColor="{AppThemeBinding Light={StaticResource Primary}, Dark={StaticResource PrimaryDark}}"
+              ColumnDefinitions="Auto,Auto,*,Auto,Auto">
+
+            <Label Grid.Column="0" Text="Year:"
+                   VerticalOptions="Center" TextColor="White" FontAttributes="Bold" FontSize="12"/>
+            <Picker Grid.Column="1" x:Name="YearPicker"
+                    WidthRequest="80" Margin="4,0,0,0"
+                    VerticalOptions="Center"
+                    SelectedIndexChanged="OnYearChanged">
+                <Picker.Items>
+                    <x:String>2021</x:String>
+                    <x:String>2022</x:String>
+                    <x:String>2023</x:String>
+                    <x:String>2024</x:String>
+                    <x:String>2025</x:String>
+                </Picker.Items>
+            </Picker>
+
+            <BoxView Grid.Column="2" Color="Transparent"/>
+
+            <Label Grid.Column="3" Text="Filter:"
+                   VerticalOptions="Center" TextColor="White" FontAttributes="Bold" FontSize="12"
+                   Margin="0,0,4,0"/>
+            <Picker Grid.Column="4" x:Name="FilterPicker"
+                    WidthRequest="115"
+                    VerticalOptions="Center"
+                    SelectedIndexChanged="OnFilterChanged">
+                <Picker.Items>
+                    <x:String>All</x:String>
+                    <x:String>P4</x:String>
+                    <x:String>G5</x:String>
+                    <x:String>── Conference ──</x:String>
+                    <x:String>SEC</x:String>
+                    <x:String>Big Ten</x:String>
+                    <x:String>Big 12</x:String>
+                    <x:String>ACC</x:String>
+                    <x:String>AAC</x:String>
+                    <x:String>Mtn West</x:String>
+                    <x:String>Sun Belt</x:String>
+                    <x:String>MAC</x:String>
+                    <x:String>Conf USA</x:String>
+                    <x:String>Independent</x:String>
+                </Picker.Items>
+            </Picker>
+        </Grid>
+
+        <!-- Games List -->
+        <CollectionView Grid.Row="1"
+                        ItemsSource="{Binding FilteredGames}"
+                        SelectionMode="None">
+
+            <!-- Column Headers -->
+            <CollectionView.Header>
+                <Grid Padding="4,3"
+                      BackgroundColor="{AppThemeBinding Light=#f0f0f0, Dark=#2b2b2b}"
+                      ColumnDefinitions="28,*,*,55,55,48">
+                    <Label Grid.Column="0" Text="Wk"   FontAttributes="Bold" FontSize="10"/>
+                    <Label Grid.Column="1" Text="Winner"  FontAttributes="Bold" FontSize="10"/>
+                    <Label Grid.Column="2" Text="Loser"   FontAttributes="Bold" FontSize="10"/>
+                    <Label Grid.Column="3" Text="Score"   FontAttributes="Bold" FontSize="10" HorizontalOptions="Center"/>
+                    <Label Grid.Column="4" Text="Proj"    FontAttributes="Bold" FontSize="10" HorizontalOptions="Center"/>
+                    <Label Grid.Column="5" Text="O/U"     FontAttributes="Bold" FontSize="10" HorizontalOptions="Center"/>
+                </Grid>
+            </CollectionView.Header>
+
+            <CollectionView.ItemTemplate>
+                <DataTemplate x:DataType="models:GameResult">
+                    <VerticalStackLayout Spacing="0">
+                        <Grid Padding="4,3"
+                              ColumnDefinitions="28,*,*,55,55,48">
+
+                            <!-- Week -->
+                            <Label Grid.Column="0"
+                                   Text="{Binding Week}"
+                                   FontSize="11"
+                                   VerticalOptions="Center"/>
+
+                            <!-- Winner -->
+                            <VerticalStackLayout Grid.Column="1" Spacing="0" VerticalOptions="Center">
+                                <Label Text="{Binding WinnerDisplay}"
+                                       FontSize="11" FontAttributes="Bold"
+                                       LineBreakMode="TailTruncation"/>
+                                <Label Text="{Binding WinnerConf}"
+                                       FontSize="9" Opacity="0.6"/>
+                            </VerticalStackLayout>
+
+                            <!-- Loser -->
+                            <VerticalStackLayout Grid.Column="2" Spacing="0" VerticalOptions="Center">
+                                <Label Text="{Binding LoserDisplay}"
+                                       FontSize="11"
+                                       LineBreakMode="TailTruncation"/>
+                                <Label Text="{Binding LoserConf}"
+                                       FontSize="9" Opacity="0.6"/>
+                            </VerticalStackLayout>
+
+                            <!-- Actual Score -->
+                            <Label Grid.Column="3"
+                                   Text="{Binding Score}"
+                                   FontSize="11" FontAttributes="Bold"
+                                   HorizontalOptions="Center"
+                                   VerticalOptions="Center"/>
+
+                            <!-- Projected Score -->
+                            <Label Grid.Column="4"
+                                   Text="{Binding ProjScore}"
+                                   FontSize="11"
+                                   HorizontalOptions="Center"
+                                   VerticalOptions="Center"
+                                   Opacity="0.75"/>
+
+                            <!-- O/U: actual / proj -->
+                            <VerticalStackLayout Grid.Column="5" Spacing="0" VerticalOptions="Center" HorizontalOptions="Center">
+                                <Label Text="{Binding DisplayOU}"
+                                       FontSize="11" FontAttributes="Bold"
+                                       HorizontalOptions="Center"/>
+                                <Label Text="{Binding DisplayProjOU}"
+                                       FontSize="9" Opacity="0.6"
+                                       HorizontalOptions="Center"/>
+                            </VerticalStackLayout>
+                        </Grid>
+                        <!-- Row divider -->
+                        <BoxView HeightRequest="1" Opacity="0.12"
+                                 Color="{AppThemeBinding Light=Black, Dark=White}"/>
+                    </VerticalStackLayout>
+                </DataTemplate>
+            </CollectionView.ItemTemplate>
+
+            <CollectionView.EmptyView>
+                <VerticalStackLayout VerticalOptions="Center" HorizontalOptions="Center" Padding="20">
+                    <Label Text="No games found" FontSize="16" HorizontalOptions="Center"/>
+                    <Label Text="{Binding StatusMessage}" FontSize="12" Opacity="0.7"
+                           HorizontalOptions="Center" Margin="0,8,0,0"/>
+                </VerticalStackLayout>
+            </CollectionView.EmptyView>
+        </CollectionView>
+
+        <!-- Status Bar -->
+        <Grid Grid.Row="2" HeightRequest="24"
+              BackgroundColor="{AppThemeBinding Light=#f0f0f0, Dark=#2b2b2b}">
+            <Label Text="{Binding StatusMessage}"
+                   Padding="8,0" FontSize="10" Opacity="0.7"
+                   VerticalOptions="Center" HorizontalOptions="Start"/>
+            <ActivityIndicator IsRunning="{Binding IsBusy}"
+                               IsVisible="{Binding IsBusy}"
+                               HeightRequest="16" WidthRequest="16"
+                               HorizontalOptions="End" VerticalOptions="Center"
+                               Margin="8,0"/>
+        </Grid>
+
+    </Grid>
+</ContentPage>

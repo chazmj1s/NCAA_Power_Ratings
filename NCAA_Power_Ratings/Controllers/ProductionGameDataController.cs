@@ -442,6 +442,152 @@ namespace NCAA_Power_Ratings.Controllers
         }
 
         /// <summary>
+        /// Get the full schedule for a season with actual and projected scores/O-U.
+        /// Example: GET /api/productiongamedata/schedule?year=2025
+        /// </summary>
+        [HttpGet("schedule")]
+        public async Task<IActionResult> GetSchedule([FromQuery] int? year)
+        {
+            try
+            {
+                var targetYear = year ?? DateTime.Now.Year;
+
+                await using var context = await contextFactory.CreateDbContextAsync();
+
+                // Load all games for the year
+                var games = await context.Games
+                    .Where(g => g.Year == targetYear)
+                    .OrderBy(g => g.Week)
+                    .ToListAsync();
+
+                if (games.Count == 0)
+                    return Ok(new List<object>());
+
+                // Load team metadata keyed by TeamID for conference/tier lookups
+                var teamIds = games.SelectMany(g => new[] { g.WinnerId, g.LoserId }).Distinct().ToList();
+                var teams = await context.Teams
+                    .Where(t => teamIds.Contains(t.TeamID))
+                    .ToDictionaryAsync(t => t.TeamID);
+
+                // Pre-game TeamRecords: for projection we use season-to-date stats
+                // accumulated BEFORE each game (i.e., from the prior year for week 1,
+                // or running totals from the same season up to but not including that week).
+                // We approximate by loading the full-season record and using the existing
+                // prediction service which is designed for pre-game use.
+                var teamRecords = await context.TeamRecords
+                    .Where(tr => tr.Year == targetYear)
+                    .ToDictionaryAsync(tr => tr.TeamID);
+
+                // Also load prior-year records as fallback for early-season games
+                var priorYearRecords = await context.TeamRecords
+                    .Where(tr => tr.Year == targetYear - 1)
+                    .ToDictionaryAsync(tr => tr.TeamID);
+
+                var avgScoreDeltas = await context.AvgScoreDeltas.ToListAsync();
+
+                // Compute league average from all games this season
+                var avgTeamScore = games.Count > 0
+                    ? (games.Average(g => g.WPoints) + games.Average(g => g.LPoints)) / 2.0
+                    : 28.0;
+
+                var results = games.Select(g =>
+                {
+                    teams.TryGetValue(g.WinnerId, out var winner);
+                    teams.TryGetValue(g.LoserId, out var loser);
+
+                    var winnerConf = winner?.ConferenceAbbr ?? winner?.Conference ?? "";
+                    var loserConf  = loser?.ConferenceAbbr  ?? loser?.Conference  ?? "";
+                    var winnerTier = GetConferenceTier(winner?.Conference, winner?.TeamName);
+                    var loserTier  = GetConferenceTier(loser?.Conference,  loser?.TeamName);
+
+                    // Projected scores: use pre-season (or prior year) records so the
+                    // projection reflects what was knowable before the game was played.
+                    double? projWinner = null, projLoser = null;
+                    try
+                    {
+                        // Pick up the running record for this team (full-season approximation)
+                        var wrec = teamRecords.GetValueOrDefault(g.WinnerId)
+                                   ?? priorYearRecords.GetValueOrDefault(g.WinnerId);
+                        var lrec = teamRecords.GetValueOrDefault(g.LoserId)
+                                   ?? priorYearRecords.GetValueOrDefault(g.LoserId);
+
+                        if (wrec != null && lrec != null)
+                        {
+                            var wGames = wrec.Wins + wrec.Losses;
+                            var lGames = lrec.Wins + lrec.Losses;
+                            var wWinPct = wGames > 0
+                                ? Math.Round((decimal)wrec.Wins / wGames * 20m, MidpointRounding.AwayFromZero) / 20m
+                                : 0m;
+                            var lWinPct = lGames > 0
+                                ? Math.Round((decimal)lrec.Wins / lGames * 20m, MidpointRounding.AwayFromZero) / 20m
+                                : 0m;
+
+                            var maxPct = Math.Max(wWinPct, lWinPct);
+                            var minPct = Math.Min(wWinPct, lWinPct);
+                            var asd = avgScoreDeltas.FirstOrDefault(
+                                a => a.Team1WinPct == maxPct && a.Team2WinPct == minPct);
+                            var delta = asd != null && asd.SampleSize >= 10
+                                ? Math.Max(-35.0, Math.Min(35.0, (double)asd.AverageScoreDelta))
+                                : 7.0;
+
+                            // Winner perspective
+                            var deltaFromWinner = wWinPct >= lWinPct ? delta : -delta;
+
+                            // Home field: 'W' = winner is home, 'L' = loser is home, 'N' = neutral
+                            var hfa = g.Location == 'W' ? 2.5 : g.Location == 'L' ? -2.5 : 0.0;
+                            deltaFromWinner += hfa;
+
+                            // Power rating adjustment
+                            if (wrec.Ranking.HasValue && lrec.Ranking.HasValue)
+                            {
+                                var ratingDiff = (double)(wrec.Ranking.Value - lrec.Ranking.Value);
+                                deltaFromWinner += ratingDiff * 0.15;
+                            }
+
+                            projWinner = Math.Round(avgTeamScore + deltaFromWinner / 2.0, 1);
+                            projLoser  = Math.Round(avgTeamScore - deltaFromWinner / 2.0, 1);
+                        }
+                    }
+                    catch { /* projection unavailable */ }
+
+                    var actualOU  = g.WPoints + g.LPoints;
+                    var projOU    = projWinner.HasValue && projLoser.HasValue
+                                    ? Math.Round(projWinner.Value + projLoser.Value, 1)
+                                    : (double?)null;
+
+                    return new
+                    {
+                        g.Id,
+                        g.Year,
+                        g.Week,
+                        WinnerName     = g.WinnerName,
+                        WinnerId       = g.WinnerId,
+                        WinnerConf     = winnerConf,
+                        WinnerTier     = winnerTier,
+                        WPoints        = g.WPoints,
+                        LoserName      = g.LoserName,
+                        LoserId        = g.LoserId,
+                        LoserConf      = loserConf,
+                        LoserTier      = loserTier,
+                        LPoints        = g.LPoints,
+                        g.Location,
+                        ActualOU       = actualOU,
+                        ProjWinnerScore = projWinner,
+                        ProjLoserScore  = projLoser,
+                        ProjOU         = projOU
+                    };
+                }).ToList();
+
+                return Ok(results);
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "Error retrieving schedule");
+                return StatusCode(500, "An error occurred while retrieving the schedule.");
+            }
+        }
+
+        /// <summary>
         /// Determines the conference tier for rankings.
         /// P4 = Power 4 conferences (SEC, Big Ten, Big 12, ACC)
         /// G5 = Group of 5 conferences (American, Mountain West, Sun Belt, MAC, C-USA)
