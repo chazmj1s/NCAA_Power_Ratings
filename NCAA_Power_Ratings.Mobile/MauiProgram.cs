@@ -24,9 +24,10 @@ public static class MauiProgram
 
 		// Register HttpClient
 		builder.Services.AddHttpClient();
+        builder.Services.AddSingleton<FollowService>();
 
-		// Register Services with HttpClient factory
-		builder.Services.AddSingleton<GameDataApiService>(sp => 
+        // Register Services with HttpClient factory
+        builder.Services.AddSingleton<GameDataApiService>(sp => 
 		{
 			var httpClientFactory = sp.GetRequiredService<IHttpClientFactory>();
 			var httpClient = httpClientFactory.CreateClient();

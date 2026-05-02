@@ -1,6 +1,9 @@
+using System.ComponentModel;
+using System.Runtime.CompilerServices;
+
 namespace NCAA_Power_Ratings.Mobile.Models
 {
-    public class GameResult
+    public class GameResult : INotifyPropertyChanged
     {
         public int Id { get; set; }
         public int Year { get; set; }
@@ -57,5 +60,23 @@ namespace NCAA_Power_Ratings.Mobile.Models
         public string LoserDisplay => Location == 'L'
             ? $"{(!string.IsNullOrEmpty(LoserShortName) ? LoserShortName : LoserName)} (H)"
             : (!string.IsNullOrEmpty(LoserShortName) ? LoserShortName : LoserName);
+
+        private bool _winnerIsFollowed;
+        public bool WinnerIsFollowed
+        {
+            get => _winnerIsFollowed;
+            set { _winnerIsFollowed = value; OnPropertyChanged(); }
+        }
+
+        private bool _loserIsFollowed;
+        public bool LoserIsFollowed
+        {
+            get => _loserIsFollowed;
+            set { _loserIsFollowed = value; OnPropertyChanged(); }
+        }
+
+        public event PropertyChangedEventHandler? PropertyChanged;
+        private void OnPropertyChanged([CallerMemberName] string? name = null)
+            => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
     }
 }

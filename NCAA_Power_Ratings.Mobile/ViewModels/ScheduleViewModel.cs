@@ -8,7 +8,7 @@ using NCAA_Power_Ratings.Mobile.Services;
 
 namespace NCAA_Power_Ratings.Mobile.ViewModels
 {
-    public class ScheduleViewModel : INotifyPropertyChanged
+    public class ScheduleViewModel : BaseViewModel
     {
         private readonly GameDataApiService _apiService;
         private List<GameResult> _allGames = new();
@@ -22,12 +22,15 @@ namespace NCAA_Power_Ratings.Mobile.ViewModels
         private string _sortColumn = "Rk";
         private bool _sortAscending = true;
 
-        public ScheduleViewModel(GameDataApiService apiService)
+        public ScheduleViewModel(GameDataApiService apiService, FollowService followService)
+    : base(followService)
         {
             _apiService = apiService;
             LoadDataCommand  = new Microsoft.Maui.Controls.Command(async () => await LoadDataAsync());
             RefreshCommand   = new Microsoft.Maui.Controls.Command(async () => await LoadDataAsync());
             SortColumnCommand = new Microsoft.Maui.Controls.Command<string>(SortByColumn);
+            
+            _followService.TeamFollowChanged += OnTeamFollowChanged;
         }
 
         public ObservableCollection<GameResult> FilteredGames
@@ -88,6 +91,13 @@ namespace NCAA_Power_Ratings.Mobile.ViewModels
                         games[i].SequenceNumber = i + 1;
 
                     _allGames = games;
+
+                    var followedIds = _followService.GetFollowedIds();
+                    foreach (var g in _allGames)
+                    {
+                        g.WinnerIsFollowed = followedIds.Contains(g.WinnerId);
+                        g.LoserIsFollowed = followedIds.Contains(g.LoserId);
+                    }
 
                     // Build sorted team list from this season's participants
                     var names = games
@@ -185,8 +195,20 @@ namespace NCAA_Power_Ratings.Mobile.ViewModels
             FilteredGames = new ObservableCollection<GameResult>(filtered);
         }
 
-        public event PropertyChangedEventHandler? PropertyChanged;
-        protected void OnPropertyChanged([CallerMemberName] string? name = null)
-            => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
+        private void OnTeamFollowChanged(int teamId, bool isFollowed)
+        {
+            foreach (var g in _allGames)
+            {
+                if (g.WinnerId == teamId) g.WinnerIsFollowed = isFollowed;
+                if (g.LoserId == teamId) g.LoserIsFollowed = isFollowed;
+            }
+
+            MainThread.BeginInvokeOnMainThread(() =>
+            {
+                var temp = FilteredGames;
+                FilteredGames = null;
+                FilteredGames = temp;
+            });
+        }
     }
 }

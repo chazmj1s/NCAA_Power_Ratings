@@ -8,12 +8,12 @@ using NCAA_Power_Ratings.Mobile.Services;
 
 namespace NCAA_Power_Ratings.Mobile.ViewModels
 {
-    public class TeamsViewModel : INotifyPropertyChanged
+    public class TeamsViewModel : BaseViewModel
     {
         private readonly GameDataApiService _apiService;
         private List<TeamInfo> _allTeams = [];
-
         private ObservableCollection<TeamInfo> _teams = [];
+
         public ObservableCollection<TeamInfo> Teams
         {
             get => _teams;
@@ -40,19 +40,6 @@ namespace NCAA_Power_Ratings.Mobile.ViewModels
             }
         }
 
-        private bool _showFollowedOnly;
-        public bool ShowFollowedOnly
-        {
-            get => _showFollowedOnly;
-            set
-            {
-                if (_showFollowedOnly == value) return;
-                _showFollowedOnly = value;
-                OnPropertyChanged();
-                ApplyFilter();
-            }
-        }
-
         private bool _isLoading;
         public bool IsLoading
         {
@@ -67,21 +54,19 @@ namespace NCAA_Power_Ratings.Mobile.ViewModels
             set { _statusMessage = value; OnPropertyChanged(); }
         }
 
-        public ICommand ToggleFollowCommand { get; }
-
-        private const string FollowedTeamsKey = "FollowedTeams";
-
-        public TeamsViewModel(GameDataApiService apiService)
+        public TeamsViewModel(GameDataApiService apiService, FollowService followService)
+    : base(followService)
         {
             _apiService = apiService;
-            ToggleFollowCommand = new Command<TeamInfo>(ToggleFollow);
+
+            // React to follow changes from any tab
+            _followService.TeamFollowChanged += OnTeamFollowChanged;
         }
 
         public async Task LoadAsync()
         {
             IsLoading = true;
             StatusMessage = string.Empty;
-
             try
             {
                 var teams = await _apiService.GetTeamsAsync();
@@ -91,14 +76,15 @@ namespace NCAA_Power_Ratings.Mobile.ViewModels
                     return;
                 }
 
-                // Load persisted follow state
-                var followed = GetFollowedIds();
+                // Hydrate follow state from FollowService
                 foreach (var t in teams)
-                    t.IsFollowed = followed.Contains(t.TeamID);
+                    t.IsFollowed = _followService.IsFollowed(t.TeamID);
 
                 _allTeams = [.. teams.OrderBy(t => t.TeamName)];
-
                 ConferenceFilters = new ObservableCollection<string>(ConferenceHelper.FilterDisplayList());
+                _selectedConference = "All";
+                OnPropertyChanged(nameof(SelectedConference));
+
                 ApplyFilter();
             }
             catch (Exception ex)
@@ -121,43 +107,31 @@ namespace NCAA_Power_Ratings.Mobile.ViewModels
                 filtered = filtered.Where(t => t.ConferenceAbbr == abbr);
             }
 
-            if (ShowFollowedOnly)
-                filtered = filtered.Where(t => t.IsFollowed);
+            // Followed teams first, then alphabetical within each group
+            var sorted = filtered
+                .OrderByDescending(t => t.IsFollowed)
+                .ThenBy(t => t.TeamName);
 
-            Teams = new ObservableCollection<TeamInfo>(filtered);
+            Teams = new ObservableCollection<TeamInfo>(sorted);
         }
 
         private void ToggleFollow(TeamInfo? team)
         {
             if (team == null) return;
-
-            team.IsFollowed = !team.IsFollowed;
-
-            var followed = GetFollowedIds();
-            if (team.IsFollowed)
-                followed.Add(team.TeamID);
-            else
-                followed.Remove(team.TeamID);
-
-            Preferences.Default.Set(FollowedTeamsKey, string.Join(",", followed));
-
-            // Only rebuild the list if followed-only mode is on (row needs to appear/disappear)
-            if (ShowFollowedOnly)
-                ApplyFilter();
+            // FollowService fires TeamFollowChanged, which calls OnTeamFollowChanged
+            _followService.Toggle(team.TeamID);
         }
 
-        public static HashSet<int> GetFollowedIds()
+        private void OnTeamFollowChanged(int teamId, bool isFollowed)
         {
-            var raw = Preferences.Default.Get(FollowedTeamsKey, string.Empty);
-            if (string.IsNullOrEmpty(raw)) return [];
-            return raw.Split(',')
-                      .Where(s => int.TryParse(s, out _))
-                      .Select(int.Parse)
-                      .ToHashSet();
+            // Update the TeamInfo object in our list
+            var team = _allTeams.FirstOrDefault(t => t.TeamID == teamId);
+            if (team != null)
+            {
+                team.IsFollowed = isFollowed;
+                // Re-sort so followed teams bubble to the top
+                ApplyFilter();
+            }
         }
-
-        public event PropertyChangedEventHandler? PropertyChanged;
-        private void OnPropertyChanged([CallerMemberName] string? name = null)
-            => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
     }
 }

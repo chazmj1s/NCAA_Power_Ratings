@@ -1,9 +1,12 @@
+using System.ComponentModel;
+using System.Runtime.CompilerServices;
+
 namespace NCAA_Power_Ratings.Mobile.Models
 {
     /// <summary>
     /// Represents a team with power rating and ranking information
     /// </summary>
-    public class TeamRanking
+    public class TeamRanking : INotifyPropertyChanged
     {
         public int TeamID { get; set; }
         public string TeamName { get; set; } = string.Empty;
@@ -47,5 +50,16 @@ namespace NCAA_Power_Ratings.Mobile.Models
         public string ActiveSortValue { get; set; } = string.Empty;
 
         public bool IsTop25 => Rank <= 25;
+
+        private bool _isFollowed;
+        public bool IsFollowed
+        {
+            get => _isFollowed;
+            set { _isFollowed = value; OnPropertyChanged(); }
+        }
+
+        public event PropertyChangedEventHandler? PropertyChanged;
+        private void OnPropertyChanged([CallerMemberName] string? name = null)
+            => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
     }
 }

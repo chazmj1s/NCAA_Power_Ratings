@@ -4,214 +4,255 @@
              xmlns:vm="clr-namespace:NCAA_Power_Ratings.Mobile.ViewModels"
              xmlns:models="clr-namespace:NCAA_Power_Ratings.Mobile.Models"
              x:Class="NCAA_Power_Ratings.Mobile.Views.SchedulePage"
+             x:Name="ThisPage"
              Title="Games">
 
-    <Grid RowDefinitions="Auto,*,24">
+  <Grid RowDefinitions="Auto,*,24">
 
-        <!-- ═══ Toolbar (two rows of pickers, labels above each) ═══ -->
-        <Grid Grid.Row="0"
-              Padding="6,4,6,6"
-              BackgroundColor="{AppThemeBinding Light={StaticResource Primary}, Dark={StaticResource PrimaryDark}}"
-              ColumnDefinitions="Auto,12,Auto,*,Auto"
-              RowDefinitions="Auto,Auto">
+    <!-- ═══ Toolbar ═══ -->
+    <Grid Grid.Row="0"
+          Padding="6,4,6,6"
+          BackgroundColor="{AppThemeBinding Light={StaticResource Primary}, Dark={StaticResource PrimaryDark}}"
+          ColumnDefinitions="Auto,12,Auto,*,Auto"
+          RowDefinitions="Auto,Auto">
 
-            <!-- Row 0: labels -->
-            <Label Grid.Row="0" Grid.Column="0" Text="Year"
-                   TextColor="White" FontAttributes="Bold" FontSize="11"
-                   HorizontalOptions="Center"/>
-            <Label Grid.Row="0" Grid.Column="2" Text="Filter"
-                   TextColor="White" FontAttributes="Bold" FontSize="11"
-                   HorizontalOptions="Center"/>
-            <Label Grid.Row="0" Grid.Column="4" Text="Team"
-                   TextColor="White" FontAttributes="Bold" FontSize="11"
-                   HorizontalOptions="Center"/>
+      <!-- Row 0: labels -->
+      <Label Grid.Row="0" Grid.Column="0" Text="Year"
+             TextColor="White" FontAttributes="Bold" FontSize="11"
+             HorizontalOptions="Center"/>
+      <Label Grid.Row="0" Grid.Column="2" Text="Filter"
+             TextColor="White" FontAttributes="Bold" FontSize="11"
+             HorizontalOptions="Center"/>
+      <Label Grid.Row="0" Grid.Column="4" Text="Team"
+             TextColor="White" FontAttributes="Bold" FontSize="11"
+             HorizontalOptions="Center"/>
 
-            <!-- Row 1: pickers -->
-            <Picker Grid.Row="1" Grid.Column="0" x:Name="YearPicker"
-                    WidthRequest="82"
-                    VerticalOptions="Center"
-                    SelectedIndexChanged="OnYearChanged">
-                <Picker.Items>
-                    <x:String>2021</x:String>
-                    <x:String>2022</x:String>
-                    <x:String>2023</x:String>
-                    <x:String>2024</x:String>
-                    <x:String>2025</x:String>
-                </Picker.Items>
-            </Picker>
+      <!-- Row 1: pickers -->
+      <Picker Grid.Row="1" Grid.Column="0" x:Name="YearPicker"
+              WidthRequest="82"
+              VerticalOptions="Center"
+              SelectedIndexChanged="OnYearChanged">
+        <Picker.Items>
+          <x:String>2021</x:String>
+          <x:String>2022</x:String>
+          <x:String>2023</x:String>
+          <x:String>2024</x:String>
+          <x:String>2025</x:String>
+        </Picker.Items>
+      </Picker>
 
-            <Picker Grid.Row="1" Grid.Column="2" x:Name="FilterPicker"
-                    WidthRequest="115"
-                    VerticalOptions="Center"
-                    SelectedIndexChanged="OnFilterChanged">
-                <Picker.Items>
-                    <x:String>All</x:String>
-                    <x:String>P4</x:String>
-                    <x:String>G5</x:String>
-                    <x:String>── Conf ──</x:String>
-                    <x:String>ACC</x:String>
-                    <x:String>Big 12</x:String>
-                    <x:String>Big Ten</x:String>
-                    <x:String>SEC</x:String>
-                    <x:String>AAC</x:String>
-                    <x:String>Conf USA</x:String>
-                    <x:String>MAC</x:String>
-                    <x:String>Mtn West</x:String>
-                    <x:String>Sun Belt</x:String>
-                    <x:String>Independent</x:String>
-                </Picker.Items>
-            </Picker>
+      <Picker Grid.Row="1" Grid.Column="2" x:Name="FilterPicker"
+              WidthRequest="115"
+              VerticalOptions="Center"
+              SelectedIndexChanged="OnFilterChanged">
+        <Picker.Items>
+          <x:String>All</x:String>
+          <x:String>P4</x:String>
+          <x:String>G5</x:String>
+          <x:String>── Conf ──</x:String>
+          <x:String>ACC</x:String>
+          <x:String>Big 12</x:String>
+          <x:String>Big Ten</x:String>
+          <x:String>SEC</x:String>
+          <x:String>AAC</x:String>
+          <x:String>Conf USA</x:String>
+          <x:String>MAC</x:String>
+          <x:String>Mtn West</x:String>
+          <x:String>Sun Belt</x:String>
+          <x:String>Independent</x:String>
+        </Picker.Items>
+      </Picker>
 
-            <Picker Grid.Row="1" Grid.Column="4" x:Name="TeamPicker"
-                    WidthRequest="145"
-                    VerticalOptions="Center"
-                    ItemsSource="{Binding TeamNames}"
-                    SelectedIndexChanged="OnTeamFilterChanged"/>
-        </Grid>
-
-        <!-- ═══ Games List ═══ -->
-        <CollectionView Grid.Row="1"
-                        ItemsSource="{Binding FilteredGames}"
-                        SelectionMode="None">
-
-            <!-- Column Headers: Rk | Winner | Loser | (stats block) -->
-            <CollectionView.Header>
-                <Grid Padding="4,3"
-                      BackgroundColor="{AppThemeBinding Light=#f0f0f0, Dark=#2b2b2b}"
-                      ColumnDefinitions="28,28,*,*,175">
-
-                    <!-- Rk — tappable -->
-                    <Label Grid.Column="0" Text="Rk ↕" FontAttributes="Bold" FontSize="10">
-                        <Label.GestureRecognizers>
-                            <TapGestureRecognizer Command="{Binding SortColumnCommand}" CommandParameter="Rk"/>
-                        </Label.GestureRecognizers>
-                    </Label>
-
-                    <!-- Wk — header -->
-                    <Label Grid.Column="1" Text="Wk" FontAttributes="Bold" FontSize="10"/>
-
-                    <!-- Winner — tappable -->
-                    <Label Grid.Column="2" Text="Winner ↕" FontAttributes="Bold" FontSize="10">
-                        <Label.GestureRecognizers>
-                            <TapGestureRecognizer Command="{Binding SortColumnCommand}" CommandParameter="Winner"/>
-                        </Label.GestureRecognizers>
-                    </Label>
-
-                    <!-- Loser — tappable -->
-                    <Label Grid.Column="3" Text="Loser ↕" FontAttributes="Bold" FontSize="10">
-                        <Label.GestureRecognizers>
-                            <TapGestureRecognizer Command="{Binding SortColumnCommand}" CommandParameter="Loser"/>
-                        </Label.GestureRecognizers>
-                    </Label>
-
-                    <!-- Stats sub-headers (Score | Margin | O/U) — not tappable -->
-                    <Grid Grid.Column="4" ColumnDefinitions="*,*,*">
-                        <Label Grid.Column="0" Text="Score"  FontAttributes="Bold" FontSize="10" HorizontalOptions="Center"/>
-                        <Label Grid.Column="1" Text="Margin" FontAttributes="Bold" FontSize="10" HorizontalOptions="Center"/>
-                        <Label Grid.Column="2" Text="O/U"    FontAttributes="Bold" FontSize="10" HorizontalOptions="Center"/>
-                    </Grid>
-                </Grid>
-            </CollectionView.Header>
-
-            <CollectionView.ItemTemplate>
-                <DataTemplate x:DataType="models:GameResult">
-                    <VerticalStackLayout Spacing="0"
-                                         Background="{Binding IsOddRow, Converter={StaticResource OddRowBackgroundConverter}}">
-                        <Grid Padding="4,3"
-                              ColumnDefinitions="28,28,*,*,175"
-                              Background="{Binding IsOddRow, Converter={StaticResource OddRowBackgroundConverter}}">
-
-                            <!-- Rk -->
-                            <Label Grid.Column="0"
-                                   Text="{Binding SequenceNumber}"
-                                   FontSize="11" Opacity="0.6"
-                                   VerticalOptions="Center"/>
-
-                            <!-- Wk -->
-                            <Label Grid.Column="1"
-                                   Text="{Binding Week}"
-                                   FontSize="11" Opacity="0.6"
-                                   VerticalOptions="Center"/>
-
-                            <!-- Winner -->
-                            <VerticalStackLayout Grid.Column="2" Spacing="0" VerticalOptions="Center">
-                                <Label Text="{Binding WinnerDisplay}"
-                                       FontSize="11" FontAttributes="Bold"
-                                       LineBreakMode="TailTruncation"/>
-                                <Label Text="{Binding WinnerConf}"
-                                       FontSize="9" Opacity="0.6"/>
-                            </VerticalStackLayout>
-
-                            <!-- Loser -->
-                            <VerticalStackLayout Grid.Column="3" Spacing="0" VerticalOptions="Center">
-                                <Label Text="{Binding LoserDisplay}"
-                                       FontSize="11"
-                                       LineBreakMode="TailTruncation"/>
-                                <Label Text="{Binding LoserConf}"
-                                       FontSize="9" Opacity="0.6"/>
-                            </VerticalStackLayout>
-
-                            <!-- Stats block: two rows (Actual / Projected) × three columns -->
-                            <Grid Grid.Column="4" ColumnDefinitions="*,*,*" RowDefinitions="Auto,Auto">
-
-                                <!-- Actual row -->
-                                <Label Grid.Row="0" Grid.Column="0"
-                                       Text="{Binding Score}"
-                                       FontSize="11" FontAttributes="Bold"
-                                       HorizontalOptions="Center"/>
-                                <Label Grid.Row="0" Grid.Column="1"
-                                       Text="{Binding ActualMargin}"
-                                       FontSize="11" FontAttributes="Bold"
-                                       HorizontalOptions="Center"/>
-                                <Label Grid.Row="0" Grid.Column="2"
-                                       Text="{Binding DisplayOU}"
-                                       FontSize="11" FontAttributes="Bold"
-                                       HorizontalOptions="Center"/>
-
-                                <!-- Projected row -->
-                                <Label Grid.Row="1" Grid.Column="0"
-                                       Text="{Binding ProjScore}"
-                                       FontSize="10" Opacity="0.6"
-                                       HorizontalOptions="Center"/>
-                                <Label Grid.Row="1" Grid.Column="1"
-                                       Text="{Binding DisplayProjMargin}"
-                                       FontSize="10" Opacity="0.6"
-                                       HorizontalOptions="Center"/>
-                                <Label Grid.Row="1" Grid.Column="2"
-                                       Text="{Binding DisplayProjOU}"
-                                       FontSize="10" Opacity="0.6"
-                                       HorizontalOptions="Center"/>
-                            </Grid>
-                        </Grid>
-
-                        <!-- Row divider -->
-                        <BoxView HeightRequest="1" Opacity="0.12"
-                                 Color="{AppThemeBinding Light=Black, Dark=White}"/>
-                    </VerticalStackLayout>
-                </DataTemplate>
-            </CollectionView.ItemTemplate>
-
-            <CollectionView.EmptyView>
-                <VerticalStackLayout VerticalOptions="Center" HorizontalOptions="Center" Padding="20">
-                    <Label Text="No games found" FontSize="16" HorizontalOptions="Center"/>
-                    <Label Text="{Binding StatusMessage}" FontSize="12" Opacity="0.7"
-                           HorizontalOptions="Center" Margin="0,8,0,0"/>
-                </VerticalStackLayout>
-            </CollectionView.EmptyView>
-        </CollectionView>
-
-        <!-- Status Bar -->
-        <Grid Grid.Row="2" HeightRequest="24"
-              BackgroundColor="{AppThemeBinding Light=#f0f0f0, Dark=#2b2b2b}">
-            <Label Text="{Binding StatusMessage}"
-                   Padding="8,0" FontSize="10" Opacity="0.7"
-                   VerticalOptions="Center" HorizontalOptions="Start"/>
-            <ActivityIndicator IsRunning="{Binding IsBusy}"
-                               IsVisible="{Binding IsBusy}"
-                               HeightRequest="16" WidthRequest="16"
-                               HorizontalOptions="End" VerticalOptions="Center"
-                               Margin="8,0"/>
-        </Grid>
-
+      <Picker Grid.Row="1" Grid.Column="4" x:Name="TeamPicker"
+              WidthRequest="145"
+              VerticalOptions="Center"
+              ItemsSource="{Binding TeamNames}"
+              SelectedIndexChanged="OnTeamFilterChanged"/>
     </Grid>
+
+    <!-- ═══ Games List ═══ -->
+    <CollectionView Grid.Row="1"
+                    ItemsSource="{Binding FilteredGames}"
+                    SelectionMode="None">
+
+      <CollectionView.Header>
+        <Grid Padding="4,3"
+              BackgroundColor="{AppThemeBinding Light=#f0f0f0, Dark=#2b2b2b}"
+              ColumnDefinitions="28,28,*,*,175">
+
+          <Label Grid.Column="0" Text="Rk ↕" FontAttributes="Bold" FontSize="10">
+            <Label.GestureRecognizers>
+              <TapGestureRecognizer Command="{Binding SortColumnCommand}" CommandParameter="Rk"/>
+            </Label.GestureRecognizers>
+          </Label>
+
+          <Label Grid.Column="1" Text="Wk" FontAttributes="Bold" FontSize="10"/>
+
+          <Label Grid.Column="2" Text="Winner ↕" FontAttributes="Bold" FontSize="10">
+            <Label.GestureRecognizers>
+              <TapGestureRecognizer Command="{Binding SortColumnCommand}" CommandParameter="Winner"/>
+            </Label.GestureRecognizers>
+          </Label>
+
+          <Label Grid.Column="3" Text="Loser ↕" FontAttributes="Bold" FontSize="10">
+            <Label.GestureRecognizers>
+              <TapGestureRecognizer Command="{Binding SortColumnCommand}" CommandParameter="Loser"/>
+            </Label.GestureRecognizers>
+          </Label>
+
+          <Grid Grid.Column="4" ColumnDefinitions="*,*,*">
+            <Label Grid.Column="0" Text="Score"  FontAttributes="Bold" FontSize="10" HorizontalOptions="Center"/>
+            <Label Grid.Column="1" Text="Margin" FontAttributes="Bold" FontSize="10" HorizontalOptions="Center"/>
+            <Label Grid.Column="2" Text="O/U"    FontAttributes="Bold" FontSize="10" HorizontalOptions="Center"/>
+          </Grid>
+        </Grid>
+      </CollectionView.Header>
+
+      <CollectionView.ItemTemplate>
+        <DataTemplate x:DataType="models:GameResult">
+          <VerticalStackLayout Spacing="0"
+                              Background="{Binding IsOddRow, Converter={StaticResource OddRowBackgroundConverter}}">
+            <Grid Padding="4,3"
+                  ColumnDefinitions="28,28,*,*,175"
+                  Background="{Binding IsOddRow, Converter={StaticResource OddRowBackgroundConverter}}">
+
+              <!-- Rk -->
+              <Label Grid.Column="0"
+                     Text="{Binding SequenceNumber}"
+                     FontSize="11" Opacity="0.6"
+                     VerticalOptions="Center"/>
+
+              <!-- Wk -->
+              <Label Grid.Column="1"
+                     Text="{Binding Week}"
+                     FontSize="11" Opacity="0.6"
+                     VerticalOptions="Center"/>
+
+              <!-- Winner: star + name/conf -->
+              <Grid Grid.Column="2" ColumnDefinitions="18,*" VerticalOptions="Center">
+                <Label Grid.Column="0"
+                       Text="☆"
+                       FontSize="14"
+                       HorizontalOptions="Center"
+                       VerticalOptions="Center">
+                  <Label.GestureRecognizers>
+                    <TapGestureRecognizer
+                        Command="{Binding Source={x:Reference ThisPage}, Path=BindingContext.ToggleFollowCommand}"
+                        CommandParameter="{Binding WinnerId}" />
+                  </Label.GestureRecognizers>
+                  <Label.Triggers>
+                    <DataTrigger TargetType="Label" Binding="{Binding WinnerIsFollowed}" Value="True">
+                      <Setter Property="Text" Value="★" />
+                      <Setter Property="TextColor" Value="{AppThemeBinding Light=#CC8800, Dark=#FFCC44}" />
+                    </DataTrigger>
+                    <DataTrigger TargetType="Label" Binding="{Binding WinnerIsFollowed}" Value="False">
+                      <Setter Property="Text" Value="☆" />
+                      <Setter Property="TextColor" Value="{AppThemeBinding Light=#AAAAAA, Dark=#555555}" />
+                    </DataTrigger>
+                  </Label.Triggers>
+                </Label>
+                <VerticalStackLayout Grid.Column="1" Spacing="0" VerticalOptions="Center">
+                  <Label Text="{Binding WinnerDisplay}"
+                         FontSize="11" FontAttributes="Bold"
+                         LineBreakMode="TailTruncation"/>
+                  <Label Text="{Binding WinnerConf}"
+                         FontSize="9" Opacity="0.6"/>
+                </VerticalStackLayout>
+              </Grid>
+
+              <!-- Loser: star + name/conf -->
+              <Grid Grid.Column="3" ColumnDefinitions="18,*" VerticalOptions="Center">
+                <Label Grid.Column="0"
+                       Text="☆"
+                       FontSize="14"
+                       HorizontalOptions="Center"
+                       VerticalOptions="Center">
+                  <Label.GestureRecognizers>
+                    <TapGestureRecognizer
+                        Command="{Binding Source={x:Reference ThisPage}, Path=BindingContext.ToggleFollowCommand}"
+                        CommandParameter="{Binding LoserId}" />
+                  </Label.GestureRecognizers>
+                  <Label.Triggers>
+                    <DataTrigger TargetType="Label" Binding="{Binding LoserIsFollowed}" Value="True">
+                      <Setter Property="Text" Value="★" />
+                      <Setter Property="TextColor" Value="{AppThemeBinding Light=#CC8800, Dark=#FFCC44}" />
+                    </DataTrigger>
+                    <DataTrigger TargetType="Label" Binding="{Binding LoserIsFollowed}" Value="False">
+                      <Setter Property="Text" Value="☆" />
+                      <Setter Property="TextColor" Value="{AppThemeBinding Light=#AAAAAA, Dark=#555555}" />
+                    </DataTrigger>
+                  </Label.Triggers>
+                </Label>
+                <VerticalStackLayout Grid.Column="1" Spacing="0" VerticalOptions="Center">
+                  <Label Text="{Binding LoserDisplay}"
+                         FontSize="11"
+                         LineBreakMode="TailTruncation"/>
+                  <Label Text="{Binding LoserConf}"
+                         FontSize="9" Opacity="0.6"/>
+                </VerticalStackLayout>
+              </Grid>
+
+              <!-- Stats block -->
+              <Grid Grid.Column="4" ColumnDefinitions="*,*,*" RowDefinitions="Auto,Auto">
+
+                <!-- Actual row -->
+                <Label Grid.Row="0" Grid.Column="0"
+                       Text="{Binding Score}"
+                       FontSize="11" FontAttributes="Bold"
+                       HorizontalOptions="Center"/>
+                <Label Grid.Row="0" Grid.Column="1"
+                       Text="{Binding ActualMargin}"
+                       FontSize="11" FontAttributes="Bold"
+                       HorizontalOptions="Center"/>
+                <Label Grid.Row="0" Grid.Column="2"
+                       Text="{Binding DisplayOU}"
+                       FontSize="11" FontAttributes="Bold"
+                       HorizontalOptions="Center"/>
+
+                <!-- Projected row -->
+                <Label Grid.Row="1" Grid.Column="0"
+                       Text="{Binding ProjScore}"
+                       FontSize="10" Opacity="0.6"
+                       HorizontalOptions="Center"/>
+                <Label Grid.Row="1" Grid.Column="1"
+                       Text="{Binding DisplayProjMargin}"
+                       FontSize="10" Opacity="0.6"
+                       HorizontalOptions="Center"/>
+                <Label Grid.Row="1" Grid.Column="2"
+                       Text="{Binding DisplayProjOU}"
+                       FontSize="10" Opacity="0.6"
+                       HorizontalOptions="Center"/>
+              </Grid>
+            </Grid>
+
+            <!-- Row divider -->
+            <BoxView HeightRequest="1" Opacity="0.12"
+                     Color="{AppThemeBinding Light=Black, Dark=White}"/>
+          </VerticalStackLayout>
+        </DataTemplate>
+      </CollectionView.ItemTemplate>
+
+      <CollectionView.EmptyView>
+        <VerticalStackLayout VerticalOptions="Center" HorizontalOptions="Center" Padding="20">
+          <Label Text="No games found" FontSize="16" HorizontalOptions="Center"/>
+          <Label Text="{Binding StatusMessage}" FontSize="12" Opacity="0.7"
+                 HorizontalOptions="Center" Margin="0,8,0,0"/>
+        </VerticalStackLayout>
+      </CollectionView.EmptyView>
+    </CollectionView>
+
+    <!-- Status Bar -->
+    <Grid Grid.Row="2" HeightRequest="24"
+          BackgroundColor="{AppThemeBinding Light=#f0f0f0, Dark=#2b2b2b}">
+      <Label Text="{Binding StatusMessage}"
+             Padding="8,0" FontSize="10" Opacity="0.7"
+             VerticalOptions="Center" HorizontalOptions="Start"/>
+      <ActivityIndicator IsRunning="{Binding IsBusy}"
+                         IsVisible="{Binding IsBusy}"
+                         HeightRequest="16" WidthRequest="16"
+                         HorizontalOptions="End" VerticalOptions="Center"
+                         Margin="8,0"/>
+    </Grid>
+
+  </Grid>
 </ContentPage>
