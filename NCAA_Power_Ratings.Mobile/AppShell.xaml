@@ -9,10 +9,22 @@
 
     <TabBar>
         <ShellContent
+            Title="Games"
+            Icon="calendar.png"
+            ContentTemplate="{DataTemplate views:SchedulePage}"
+            Route="SchedulePage" />
+
+        <ShellContent
             Title="Rankings"
             Icon="trophy.png"
             ContentTemplate="{DataTemplate views:PowerRankingsPage}"
             Route="PowerRankingsPage" />
+
+        <ShellContent
+            Title="Teams"
+            Icon="people.png"
+            ContentTemplate="{DataTemplate views:TeamsPage}"
+            Route="TeamsPage" />
 
         <ShellContent
             Title="Home"

@@ -100,6 +100,42 @@ namespace NCAA_Power_Ratings.Mobile.Services
         }
 
         /// <summary>
+        /// Gets all FBS teams with id, name, conference, and tier.
+        /// </summary>
+        public async Task<List<Models.TeamInfo>?> GetTeamsAsync()
+        {
+            try
+            {
+                var url = $"{_baseUrl}/teams";
+                return await _httpClient.GetFromJsonAsync<List<Models.TeamInfo>>(url);
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"[API] Error getting teams: {ex.Message}");
+                return null;
+            }
+        }
+
+        /// <summary>
+        /// Gets the full season schedule with actual and projected scores.
+        /// </summary>
+        public async Task<List<Models.GameResult>?> GetScheduleAsync(int? year = null)
+        {
+            try
+            {
+                var currentYear = year ?? DateTime.Now.Year;
+                var url = $"{_baseUrl}/schedule?year={currentYear}";
+                var schedule = await _httpClient.GetFromJsonAsync<List<Models.GameResult>>(url);
+                return schedule;
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"[API] Error getting schedule: {ex.Message}");
+                return null;
+            }
+        }
+
+        /// <summary>
         /// Gets team schedule as JSON
         /// </summary>
         public async Task<string?> GetTeamScheduleAsync(int teamId, int year)
