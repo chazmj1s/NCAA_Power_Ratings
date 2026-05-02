@@ -590,6 +590,288 @@ namespace NCAA_Power_Ratings.Controllers
         }
 
         /// <summary>
+        /// Returns all FBS teams with id, name, short name, conference, and tier.
+        /// Example: GET /api/productiongamedata/teams
+        /// </summary>
+        [HttpGet("teams")]
+        public async Task<IActionResult> GetTeams()
+        {
+            try
+            {
+                await using var context = await contextFactory.CreateDbContextAsync();
+
+                var teams = await context.Teams
+                    .OrderBy(t => t.TeamName)
+                    .Select(t => new
+                    {
+                        t.TeamID,
+                        t.TeamName,
+                        ShortName      = t.ShortName ?? t.TeamName,
+                        t.Conference,
+                        ConferenceAbbr = t.ConferenceAbbr ?? "",
+                        t.Division,
+                        Tier           = GetConferenceTier(t.Conference, t.TeamName)
+                    })
+                    .ToListAsync();
+
+                return Ok(teams);
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "Error retrieving teams");
+                return StatusCode(500, "An error occurred while retrieving teams.");
+            }
+        }
+
+        /// <summary>
+        /// Returns only named (whitelisted) rivalries with team names and series stats.
+        /// Example: GET /api/productiongamedata/rivalries/named
+        /// </summary>
+        [HttpGet("rivalries/named")]
+        public async Task<IActionResult> GetNamedRivalries()
+        {
+            try
+            {
+                await using var context = await contextFactory.CreateDbContextAsync();
+
+                var rivalries = await context.MatchupHistories
+                    .Where(m => m.RivalryName != null)
+                    .OrderBy(m => m.RivalryTier)
+                    .ThenBy(m => m.RivalryName)
+                    .ToListAsync();
+
+                var teamIds = rivalries.SelectMany(r => new[] { r.Team1Id, r.Team2Id }).Distinct().ToList();
+                var teams = await context.Teams
+                    .Where(t => teamIds.Contains(t.TeamID))
+                    .ToDictionaryAsync(t => t.TeamID);
+
+                var result = rivalries.Select(r =>
+                {
+                    teams.TryGetValue(r.Team1Id, out var t1);
+                    teams.TryGetValue(r.Team2Id, out var t2);
+                    return new
+                    {
+                        r.Team1Id,
+                        Team1Name      = t1?.TeamName ?? "Unknown",
+                        Team1ShortName = t1?.ShortName ?? t1?.TeamName ?? "Unknown",
+                        r.Team2Id,
+                        Team2Name      = t2?.TeamName ?? "Unknown",
+                        Team2ShortName = t2?.ShortName ?? t2?.TeamName ?? "Unknown",
+                        r.RivalryName,
+                        r.RivalryTier,
+                        r.GamesPlayed,
+                        r.AvgMargin,
+                        r.StDevMargin,
+                        r.UpsetRate,
+                        r.FirstPlayed,
+                        r.LastPlayed
+                    };
+                }).ToList();
+
+                return Ok(result);
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "Error retrieving named rivalries");
+                return StatusCode(500, "An error occurred while retrieving named rivalries.");
+            }
+        }
+
+        /// <summary>
+        /// Returns yearly rank/rating/SOS history for a team (up to N years back).
+        /// Example: GET /api/productiongamedata/teamhistory?teamId=47&years=10
+        /// </summary>
+        [HttpGet("teamhistory")]
+        public async Task<IActionResult> GetTeamHistory([FromQuery] int teamId, [FromQuery] int years = 10)
+        {
+            try
+            {
+                await using var context = await contextFactory.CreateDbContextAsync();
+
+                var team = await context.Teams.FindAsync(teamId);
+                if (team == null)
+                    return NotFound($"Team {teamId} not found.");
+
+                var cutoffYear = (short)(DateTime.Now.Year - years);
+
+                var records = await context.TeamRecords
+                    .Where(tr => tr.TeamID == teamId && tr.Year >= cutoffYear)
+                    .OrderBy(tr => tr.Year)
+                    .ToListAsync();
+
+                // Compute overall rank per year by ordering all teams by rating
+                var allYears = records.Select(r => r.Year).Distinct().ToList();
+                var ranksByYear = new Dictionary<short, int>();
+
+                foreach (var yr in allYears)
+                {
+                    var allRanked = (await context.TeamRecords
+                        .Where(tr => tr.Year == yr && tr.Ranking.HasValue)
+                        .ToListAsync())
+                        .OrderByDescending(tr => tr.Ranking)
+                        .ToList();
+
+                    var idx = allRanked.FindIndex(tr => tr.TeamID == teamId);
+                    if (idx >= 0) ranksByYear[yr] = idx + 1;
+                }
+
+                var result = records.Select(r => new
+                {
+                    Year          = (int)r.Year,
+                    r.Wins,
+                    r.Losses,
+                    Record        = $"{r.Wins}-{r.Losses}",
+                    PowerRating   = r.Ranking,
+                    BaseSOS       = r.BaseSOS,
+                    CombinedSOS   = r.CombinedSOS,
+                    OverallRank   = ranksByYear.GetValueOrDefault(r.Year, 0),
+                    Tier          = GetConferenceTier(team.Conference, team.TeamName)
+                }).ToList();
+
+                return Ok(new
+                {
+                    TeamId        = teamId,
+                    TeamName      = team.TeamName,
+                    ShortName     = team.ShortName ?? team.TeamName,
+                    ConferenceAbbr = team.ConferenceAbbr,
+                    History       = result
+                });
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "Error retrieving team history for {TeamId}", teamId);
+                return StatusCode(500, "An error occurred while retrieving team history.");
+            }
+        }
+
+        /// <summary>
+        /// Returns yearly game results for a rivalry matchup (up to N years back).
+        /// Also includes the projected result for the current/upcoming year if data exists.
+        /// Example: GET /api/productiongamedata/rivalryhistory?team1Id=12&team2Id=47&years=10
+        /// </summary>
+        [HttpGet("rivalryhistory")]
+        public async Task<IActionResult> GetRivalryHistory(
+            [FromQuery] int team1Id,
+            [FromQuery] int team2Id,
+            [FromQuery] int years = 10)
+        {
+            try
+            {
+                await using var context = await contextFactory.CreateDbContextAsync();
+
+                var team1 = await context.Teams.FindAsync(team1Id);
+                var team2 = await context.Teams.FindAsync(team2Id);
+                if (team1 == null || team2 == null)
+                    return NotFound("One or both teams not found.");
+
+                var cutoffYear = DateTime.Now.Year - years;
+
+                // Games where either team was winner or loser
+                var games = await context.Games
+                    .Where(g => g.Year >= cutoffYear &&
+                        ((g.WinnerId == team1Id && g.LoserId == team2Id) ||
+                         (g.WinnerId == team2Id && g.LoserId == team1Id)))
+                    .OrderBy(g => g.Year)
+                    .ThenBy(g => g.Week)
+                    .ToListAsync();
+
+                // Rivalry metadata
+                var rivalry = await context.MatchupHistories
+                    .FirstOrDefaultAsync(m =>
+                        (m.Team1Id == team1Id && m.Team2Id == team2Id) ||
+                        (m.Team1Id == team2Id && m.Team2Id == team1Id));
+
+                // Load season records for projection
+                var avgScoreDeltas = await context.AvgScoreDeltas.ToListAsync();
+                var avgTeamScore   = games.Count > 0
+                    ? (games.Average(g => g.WPoints) + games.Average(g => g.LPoints)) / 2.0
+                    : 28.0;
+
+                var history = games.Select(g =>
+                {
+                    // From team1's perspective
+                    var team1Won   = g.WinnerId == team1Id;
+                    var team1Score = team1Won ? g.WPoints : g.LPoints;
+                    var team2Score = team1Won ? g.LPoints : g.WPoints;
+
+                    return new
+                    {
+                        g.Year,
+                        g.Week,
+                        g.Location,
+                        Team1Score   = team1Score,
+                        Team2Score   = team2Score,
+                        Margin       = team1Score - team2Score,   // positive = team1 won
+                        ActualOU     = g.WPoints + g.LPoints,
+                        Team1Won     = team1Won,
+                        WinnerName   = team1Won ? team1.TeamName : team2.TeamName,
+                        Score        = $"{g.WPoints}-{g.LPoints}"
+                    };
+                }).ToList();
+
+                // Project current year if both teams have records
+                object? projection = null;
+                var currentYear = (short)DateTime.Now.Year;
+                var t1Record = await context.TeamRecords
+                    .FirstOrDefaultAsync(tr => tr.TeamID == team1Id && tr.Year == currentYear);
+                var t2Record = await context.TeamRecords
+                    .FirstOrDefaultAsync(tr => tr.TeamID == team2Id && tr.Year == currentYear);
+
+                if (t1Record != null && t2Record != null)
+                {
+                    var t1Games  = t1Record.Wins + t1Record.Losses;
+                    var t2Games  = t2Record.Wins + t2Record.Losses;
+                    var t1WinPct = t1Games > 0 ? Math.Round((decimal)t1Record.Wins / t1Games * 20m, MidpointRounding.AwayFromZero) / 20m : 0m;
+                    var t2WinPct = t2Games > 0 ? Math.Round((decimal)t2Record.Wins / t2Games * 20m, MidpointRounding.AwayFromZero) / 20m : 0m;
+                    var maxPct   = Math.Max(t1WinPct, t2WinPct);
+                    var minPct   = Math.Min(t1WinPct, t2WinPct);
+                    var asd      = avgScoreDeltas.FirstOrDefault(a => a.Team1WinPct == maxPct && a.Team2WinPct == minPct);
+                    var delta    = asd != null && asd.SampleSize >= 10
+                        ? Math.Max(-35.0, Math.Min(35.0, (double)asd.AverageScoreDelta))
+                        : 7.0;
+                    var deltaFromT1 = t1WinPct >= t2WinPct ? delta : -delta;
+                    if (t1Record.Ranking.HasValue && t2Record.Ranking.HasValue)
+                        deltaFromT1 += (double)(t1Record.Ranking.Value - t2Record.Ranking.Value) * 0.15;
+
+                    var projT1 = Math.Round(avgTeamScore + deltaFromT1 / 2.0, 1);
+                    var projT2 = Math.Round(avgTeamScore - deltaFromT1 / 2.0, 1);
+
+                    projection = new
+                    {
+                        Year         = currentYear,
+                        ProjTeam1Score = projT1,
+                        ProjTeam2Score = projT2,
+                        ProjMargin   = Math.Round(projT1 - projT2, 1),
+                        ProjOU       = Math.Round(projT1 + projT2, 1),
+                        IsProjected  = true
+                    };
+                }
+
+                return Ok(new
+                {
+                    Team1Id        = team1Id,
+                    Team1Name      = team1.TeamName,
+                    Team1ShortName = team1.ShortName ?? team1.TeamName,
+                    Team2Id        = team2Id,
+                    Team2Name      = team2.TeamName,
+                    Team2ShortName = team2.ShortName ?? team2.TeamName,
+                    RivalryName    = rivalry?.RivalryName,
+                    RivalryTier    = rivalry?.RivalryTier,
+                    GamesPlayed    = rivalry?.GamesPlayed ?? history.Count,
+                    AvgMargin      = rivalry?.AvgMargin,
+                    UpsetRate      = rivalry?.UpsetRate,
+                    History        = history,
+                    CurrentYearProjection = projection
+                });
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "Error retrieving rivalry history for {T1} vs {T2}", team1Id, team2Id);
+                return StatusCode(500, "An error occurred while retrieving rivalry history.");
+            }
+        }
+
+        /// <summary>
         /// Determines the conference tier for rankings.
         /// P4 = Power 4 conferences (SEC, Big Ten, Big 12, ACC)
         /// G5 = Group of 5 conferences (American, Mountain West, Sun Belt, MAC, C-USA)
