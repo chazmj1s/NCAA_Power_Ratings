@@ -6,21 +6,20 @@
              x:Class="NCAA_Power_Ratings.Mobile.Views.PowerRankingsPage"
              Title="Power Rankings">
 
-    <Grid RowDefinitions="Auto,Auto,*,Auto">
+    <Grid RowDefinitions="Auto,*,Auto">
 
-        <!-- Filter Bar -->
-        <HorizontalStackLayout Grid.Row="0" 
-                              Padding="10"
-                              Spacing="10"
-                              BackgroundColor="{AppThemeBinding Light={StaticResource Primary}, Dark={StaticResource PrimaryDark}}">
+        <!-- Header Bar -->
+        <Grid Grid.Row="0"
+              Padding="6,0"
+              HeightRequest="38"
+              BackgroundColor="{AppThemeBinding Light={StaticResource Primary}, Dark={StaticResource PrimaryDark}}"
+              ColumnDefinitions="Auto,Auto,*,Auto,Auto">
 
-            <!-- Year Picker -->
-            <Label Text="Year:" 
-                   VerticalOptions="Center"
-                   TextColor="White"
-                   FontAttributes="Bold"/>
-            <Picker x:Name="YearPicker"
-                    WidthRequest="100"
+            <Label Grid.Column="0" Text="Year:"
+                   VerticalOptions="Center" TextColor="White" FontAttributes="Bold" FontSize="12"/>
+            <Picker Grid.Column="1" x:Name="YearPicker"
+                    WidthRequest="80" Margin="4,0,0,0"
+                    VerticalOptions="Center"
                     SelectedIndexChanged="OnYearChanged">
                 <Picker.Items>
                     <x:String>2021</x:String>
@@ -31,93 +30,70 @@
                 </Picker.Items>
             </Picker>
 
-            <!-- Conference Filter -->
-            <Label Text="Conference:" 
-                   VerticalOptions="Center"
-                   TextColor="White"
-                   FontAttributes="Bold"
-                   Margin="20,0,0,0"/>
-            <Picker WidthRequest="120"
-                    ItemsSource="{Binding Conferences}"
-                    SelectedItem="{Binding SelectedConference}" />
-        </HorizontalStackLayout>
+            <BoxView Grid.Column="2" Color="Transparent"/>
 
-        <!-- Quick Filters -->
-        <HorizontalStackLayout Grid.Row="1" 
-                              Padding="10,5"
-                              Spacing="10">
-            <Button Text="All" 
-                    Command="{Binding ApplyFilterCommand}"
-                    CommandParameter="All"
-                    BackgroundColor="{StaticResource Secondary}"
-                    WidthRequest="80"/>
-            <Button Text="Top 25" 
-                    Command="{Binding ApplyFilterCommand}"
-                    CommandParameter="Top25"
-                    BackgroundColor="{StaticResource Secondary}"
-                    WidthRequest="80"/>
-            <Button Text="🔄 Refresh" 
-                    Command="{Binding RefreshCommand}"
-                    BackgroundColor="{StaticResource Tertiary}"
-                    WidthRequest="100"/>
-        </HorizontalStackLayout>
+            <Label Grid.Column="3" Text="Filter:"
+                   VerticalOptions="Center" TextColor="White" FontAttributes="Bold" FontSize="12"
+                   Margin="0,0,4,0"/>
+            <Picker Grid.Column="4" x:Name="FilterPicker"
+                    WidthRequest="115"
+                    VerticalOptions="Center"
+                    SelectedIndexChanged="OnFilterChanged">
+                <Picker.Items>
+                    <x:String>All</x:String>
+                    <x:String>Top 25</x:String>
+                    <x:String>── Tier ──</x:String>
+                    <x:String>P4</x:String>
+                    <x:String>G5</x:String>
+                    <x:String>── Conference ──</x:String>
+                    <x:String>SEC</x:String>
+                    <x:String>Big Ten</x:String>
+                    <x:String>Big 12</x:String>
+                    <x:String>ACC</x:String>
+                    <x:String>AAC</x:String>
+                    <x:String>Mtn West</x:String>
+                    <x:String>Sun Belt</x:String>
+                    <x:String>MAC</x:String>
+                    <x:String>Conf USA</x:String>
+                    <x:String>Independent</x:String>
+                </Picker.Items>
+            </Picker>
+        </Grid>
 
         <!-- Rankings List -->
-        <CollectionView Grid.Row="2"
+        <CollectionView Grid.Row="1"
                        ItemsSource="{Binding FilteredTeams}"
                        SelectionMode="Single">
 
                         <CollectionView.Header>
-                <!-- Column Headers (tappable for sorting) -->
-                <Grid Padding="10,5"
+                <!-- Column Headers -->
+                <Grid Padding="4,3"
                       BackgroundColor="{AppThemeBinding Light=#f0f0f0, Dark=#2b2b2b}"
-                      ColumnDefinitions="60,*,80,100,100,80">
-                    
-                    <!-- Rank Header -->
-                    <Label Grid.Column="0" Text="Rank ?" FontAttributes="Bold">
+                      ColumnDefinitions="44,*,55,70,60">
+
+                    <Label Grid.Column="0" Text="Rank ↕" FontAttributes="Bold" FontSize="10">
                         <Label.GestureRecognizers>
-                            <TapGestureRecognizer Command="{Binding SortColumnCommand}"
-                                                CommandParameter="Rank"/>
+                            <TapGestureRecognizer Command="{Binding SortColumnCommand}" CommandParameter="Rank"/>
                         </Label.GestureRecognizers>
                     </Label>
-                    
-                    <!-- Team Header -->
-                    <Label Grid.Column="1" Text="Team ?" FontAttributes="Bold">
+                    <Label Grid.Column="1" Text="Team ↕" FontAttributes="Bold" FontSize="10">
                         <Label.GestureRecognizers>
-                            <TapGestureRecognizer Command="{Binding SortColumnCommand}"
-                                                CommandParameter="Team"/>
+                            <TapGestureRecognizer Command="{Binding SortColumnCommand}" CommandParameter="Team"/>
                         </Label.GestureRecognizers>
                     </Label>
-                    
-                    <!-- Record Header -->
-                    <Label Grid.Column="2" Text="Record ?" FontAttributes="Bold">
+                    <Label Grid.Column="2" Text="Rec ↕" FontAttributes="Bold" FontSize="10">
                         <Label.GestureRecognizers>
-                            <TapGestureRecognizer Command="{Binding SortColumnCommand}"
-                                                CommandParameter="Record"/>
+                            <TapGestureRecognizer Command="{Binding SortColumnCommand}" CommandParameter="Record"/>
                         </Label.GestureRecognizers>
                     </Label>
-                    
-                    <!-- Rating Header -->
-                    <Label Grid.Column="3" Text="Rating ?" FontAttributes="Bold">
+                    <Label Grid.Column="3" Text="Rating ↕" FontAttributes="Bold" FontSize="10">
                         <Label.GestureRecognizers>
-                            <TapGestureRecognizer Command="{Binding SortColumnCommand}"
-                                                CommandParameter="Rating"/>
+                            <TapGestureRecognizer Command="{Binding SortColumnCommand}" CommandParameter="Rating"/>
                         </Label.GestureRecognizers>
                     </Label>
-                    
-                    <!-- Conference Header -->
-                    <Label Grid.Column="4" Text="Conference ?" FontAttributes="Bold">
+                    <Label Grid.Column="4" Text="SOS ↕" FontAttributes="Bold" FontSize="10">
                         <Label.GestureRecognizers>
-                            <TapGestureRecognizer Command="{Binding SortColumnCommand}"
-                                                CommandParameter="Conference"/>
-                        </Label.GestureRecognizers>
-                    </Label>
-                    
-                    <!-- SOS Header -->
-                    <Label Grid.Column="5" Text="SOS ?" FontAttributes="Bold">
-                        <Label.GestureRecognizers>
-                            <TapGestureRecognizer Command="{Binding SortColumnCommand}"
-                                                CommandParameter="SOS"/>
+                            <TapGestureRecognizer Command="{Binding SortColumnCommand}" CommandParameter="SOS"/>
                         </Label.GestureRecognizers>
                     </Label>
                 </Grid>
@@ -125,60 +101,67 @@
 
             <CollectionView.ItemTemplate>
                 <DataTemplate x:DataType="models:TeamRanking">
-                    <Grid Padding="10,8"
-                          ColumnDefinitions="60,*,80,100,100,80">
+                    <VerticalStackLayout Spacing="0">
+                        <Grid Padding="4,3"
+                              ColumnDefinitions="44,*,55,70,60">
 
-                        <!-- Rank with highlighting for Top 25 -->
-                        <Border Grid.Column="0"
-                                BackgroundColor="{Binding IsTop25, Converter={StaticResource BoolToColorConverter}}"
-                                StrokeThickness="0"
-                                Padding="8,4"
-                                WidthRequest="75"
-                                HorizontalOptions="Center">
-                            <Border.StrokeShape>
-                                <RoundRectangle CornerRadius="4"/>
-                            </Border.StrokeShape>
-                            <Label Text="{Binding DisplayRank}"
-                                   FontAttributes="Bold"
-                                   TextColor="White"
-                                   HorizontalOptions="Center"/>
-                        </Border>
+                            <!-- Rank badge -->
+                            <Border Grid.Column="0"
+                                    BackgroundColor="{Binding IsTop25, Converter={StaticResource BoolToColorConverter}}"
+                                    StrokeThickness="0"
+                                    Padding="2,2"
+                                    HeightRequest="26"
+                                    WidthRequest="40"
+                                    HorizontalOptions="Center"
+                                    VerticalOptions="Center">
+                                <Border.StrokeShape>
+                                    <RoundRectangle CornerRadius="3"/>
+                                </Border.StrokeShape>
+                                <Label Text="{Binding DisplayRank}"
+                                       FontSize="11" FontAttributes="Bold"
+                                       TextColor="White"
+                                       HorizontalOptions="Center"
+                                       VerticalOptions="Center"/>
+                            </Border>
 
-                        <!-- Team Name -->
-                        <VerticalStackLayout Grid.Column="1" Spacing="2">
-                            <Label Text="{Binding TeamName}"
-                                   FontSize="16"
-                                   FontAttributes="Bold"/>
-                            <Label Text="{Binding Conference}"
-                                   FontSize="12"
-                                   Opacity="0.7"/>
-                        </VerticalStackLayout>
+                            <!-- Team + Conf · Tier -->
+                            <VerticalStackLayout Grid.Column="1" Spacing="0" VerticalOptions="Center">
+                                <Label Text="{Binding TeamName}"
+                                       FontSize="12" FontAttributes="Bold"
+                                       LineBreakMode="TailTruncation"/>
+                                <Label FontSize="10" Opacity="0.6" LineBreakMode="TailTruncation">
+                                    <Label.FormattedText>
+                                        <FormattedString>
+                                            <Span Text="{Binding ConferenceAbbr}"/>
+                                            <Span Text=" · "/>
+                                            <Span Text="{Binding DisplayTierWithRank}"/>
+                                        </FormattedString>
+                                    </Label.FormattedText>
+                                </Label>
+                            </VerticalStackLayout>
 
-                        <!-- Record -->
-                        <Label Grid.Column="2"
-                               Text="{Binding Record}"
-                               FontSize="14"
-                               VerticalOptions="Center"/>
+                            <!-- Record -->
+                            <Label Grid.Column="2"
+                                   Text="{Binding Record}"
+                                   FontSize="11"
+                                   VerticalOptions="Center"/>
 
-                        <!-- Power Rating -->
-                        <Label Grid.Column="3"
-                               Text="{Binding DisplayRanking}"
-                               FontSize="14"
-                               FontAttributes="Bold"
-                               VerticalOptions="Center"/>
+                            <!-- Rating -->
+                            <Label Grid.Column="3"
+                                   Text="{Binding DisplayRanking}"
+                                   FontSize="11" FontAttributes="Bold"
+                                   VerticalOptions="Center"/>
 
-                        <!-- Conference Abbreviation -->
-                        <Label Grid.Column="4"
-                               Text="{Binding ConferenceAbbr}"
-                               FontSize="12"
-                               VerticalOptions="Center"/>
-
-                        <!-- SOS -->
-                        <Label Grid.Column="5"
-                               Text="{Binding DisplaySOS}"
-                               FontSize="12"
-                               VerticalOptions="Center"/>
-                    </Grid>
+                            <!-- SOS -->
+                            <Label Grid.Column="4"
+                                   Text="{Binding DisplaySOS}"
+                                   FontSize="11"
+                                   VerticalOptions="Center"/>
+                        </Grid>
+                        <!-- Row divider -->
+                        <BoxView HeightRequest="1" Opacity="0.12"
+                                 Color="{AppThemeBinding Light=Black, Dark=White}"/>
+                    </VerticalStackLayout>
                 </DataTemplate>
             </CollectionView.ItemTemplate>
 
@@ -199,22 +182,21 @@
         </CollectionView>
 
         <!-- Status Bar -->
-        <BoxView Grid.Row="3" 
-                 HeightRequest="1" 
-                 Color="{AppThemeBinding Light=#e0e0e0, Dark=#404040}"/>
-        <Label Grid.Row="3"
-               Text="{Binding StatusMessage}"
-               Padding="10,5"
-               FontSize="12"
-               Opacity="0.8"
-               HorizontalOptions="Start"/>
-
-        <!-- Loading Indicator -->
-        <ActivityIndicator Grid.Row="3"
-                          IsRunning="{Binding IsBusy}"
-                          IsVisible="{Binding IsBusy}"
-                          HorizontalOptions="End"
-                          Margin="10"/>
+        <Grid Grid.Row="2" HeightRequest="24"
+              BackgroundColor="{AppThemeBinding Light=#f0f0f0, Dark=#2b2b2b}">
+            <Label Text="{Binding StatusMessage}"
+                   Padding="8,0"
+                   FontSize="10"
+                   Opacity="0.7"
+                   VerticalOptions="Center"
+                   HorizontalOptions="Start"/>
+            <ActivityIndicator IsRunning="{Binding IsBusy}"
+                               IsVisible="{Binding IsBusy}"
+                               HeightRequest="16" WidthRequest="16"
+                               HorizontalOptions="End"
+                               VerticalOptions="Center"
+                               Margin="8,0"/>
+        </Grid>
     </Grid>
 
 </ContentPage>

@@ -374,7 +374,7 @@ namespace NCAA_Power_Ratings.Controllers
                     .Select(tr => new
                     {
                         TeamRecord = tr,
-                        Tier = GetConferenceTier(tr.Team?.Conference)
+                        Tier = GetConferenceTier(tr.Team?.Conference, tr.Team?.TeamName)
                     })
                     .OrderByDescending(t => t.TeamRecord.Ranking)
                     .ToList();
@@ -445,9 +445,20 @@ namespace NCAA_Power_Ratings.Controllers
         /// Determines the conference tier for rankings.
         /// P4 = Power 4 conferences (SEC, Big Ten, Big 12, ACC)
         /// G5 = Group of 5 conferences (American, Mountain West, Sun Belt, MAC, C-USA)
+        /// Independent = FBS independents (Army, Liberty, etc.)
+        /// Team-name overrides handle edge cases where conference data doesn't reflect competitive tier.
         /// </summary>
-        private static string GetConferenceTier(string? conference)
+        private static string GetConferenceTier(string? conference, string? teamName = null)
         {
+            // Team-name overrides for independents whose tier doesn't match their conference string
+            if (!string.IsNullOrEmpty(teamName))
+            {
+                if (teamName.Equals("Notre Dame", StringComparison.OrdinalIgnoreCase))
+                    return "P4";
+                if (teamName.Equals("Connecticut", StringComparison.OrdinalIgnoreCase))
+                    return "G5";
+            }
+
             if (string.IsNullOrEmpty(conference))
                 return "Other";
 
@@ -457,19 +468,19 @@ namespace NCAA_Power_Ratings.Controllers
                 return "P4";
 
             // Group of 5 conferences
-            var group5 = new[] 
-            { 
+            var group5 = new[]
+            {
                 "American Athletic", "American", "AAC",
-                "Mountain West", 
-                "Sun Belt", 
+                "Mountain West",
+                "Sun Belt",
                 "Mid-American", "MAC",
                 "Conference USA", "C-USA",
-                "Pac-12" // Remaining Pac-12 teams (mostly moved to other conferences)
+                "Pac-12"
             };
             if (group5.Any(g5 => conference.Contains(g5, StringComparison.OrdinalIgnoreCase)))
                 return "G5";
 
-            // Independent teams (Notre Dame, etc.)
+            // Independent teams (Army, Liberty, etc.)
             if (conference.Contains("Independent", StringComparison.OrdinalIgnoreCase))
                 return "Independent";
 

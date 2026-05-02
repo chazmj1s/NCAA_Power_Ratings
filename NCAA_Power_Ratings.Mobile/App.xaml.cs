@@ -12,6 +12,12 @@ public partial class App : Application
 
 	protected override Window CreateWindow(IActivationState? activationState)
 	{
-		return new Window(new AppShell());
+		var window = new Window(new AppShell());
+
+		// Default to iPhone 16 Pro Max portrait dimensions (430 x 932 points)
+		window.Width = 430;
+		window.Height = 932;
+
+		return window;
 	}
 }

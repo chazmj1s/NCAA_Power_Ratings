@@ -32,10 +32,19 @@ namespace NCAA_Power_Ratings.Mobile.Models
         public string DisplayOverallRank => $"#{OverallRank}";
         public string DisplayTierRank => $"#{TierRank}";
         public string DisplayTier => Tier ?? "N/A";
-        public string DisplayTierWithRank => $"{DisplayTier} #{TierRank}";
+        public string DisplayTierWithRank => Tier switch
+        {
+            "P4" => $"P4 (#{TierRank})",
+            "G5" => $"G5 (#{TierRank})",
+            "Independent" => "Ind",
+            _ => Tier ?? "N/A"
+        };
 
         public string DisplayRanking => Ranking?.ToString("F4") ?? "N/A";
         public string DisplaySOS => CombinedSOS?.ToString("F4") ?? "N/A";
+
+        // Set by ViewModel after each sort change to drive the dynamic column
+        public string ActiveSortValue { get; set; } = string.Empty;
 
         public bool IsTop25 => Rank <= 25;
     }
