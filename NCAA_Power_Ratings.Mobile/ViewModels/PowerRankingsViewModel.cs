@@ -11,9 +11,9 @@ namespace NCAA_Power_Ratings.Mobile.ViewModels
     /// <summary>
     /// ViewModel for the Power Rankings page with sorting and filtering
     /// </summary>
-    public class PowerRankingsViewModel : INotifyPropertyChanged
+    public class PowerRankingsViewModel : BaseViewModel
     {
-        private readonly GameDataApiService _apiService;
+       private readonly GameDataApiService _apiService;
         private List<TeamRanking> _allTeams = new();
         private ObservableCollection<TeamRanking> _filteredTeams = new();
         private bool _isBusy;
@@ -24,9 +24,11 @@ namespace NCAA_Power_Ratings.Mobile.ViewModels
         private int _selectedYear;
         private string _selectedConferenceFilter = "All";
 
-        public PowerRankingsViewModel(GameDataApiService apiService)
+        public PowerRankingsViewModel(GameDataApiService apiService, FollowService followService)
+            : base(followService)
         {
             _apiService = apiService;
+
             _selectedYear = 2025; // Default to most recent year with data
 
             // Initialize commands - use Microsoft.Maui.Controls.Command
@@ -38,6 +40,18 @@ namespace NCAA_Power_Ratings.Mobile.ViewModels
 
             // Available conferences for filtering
             Conferences = new ObservableCollection<string>(ConferenceHelper.FilterDisplayList());
+            _followService.TeamFollowChanged += OnTeamFollowChanged;
+        }
+
+        private void OnTeamFollowChanged(int teamId, bool isFollowed)
+        {
+            var team = _allTeams.FirstOrDefault(t => t.TeamID == teamId);
+            if (team != null)
+            {
+                team.IsFollowed = isFollowed;
+                // No re-sort needed here — rankings stay in rank order
+                // but the star on that row will update via INotifyPropertyChanged
+            }
         }
 
         #region Properties
@@ -148,6 +162,11 @@ namespace NCAA_Power_Ratings.Mobile.ViewModels
                 {
                     System.Diagnostics.Debug.WriteLine($"[PowerRankings] Loaded {teams.Count} teams");
                     _allTeams = teams;
+
+                    var followedIds = _followService.GetFollowedIds();
+                    foreach (var t in _allTeams)
+                        t.IsFollowed = followedIds.Contains(t.TeamID);
+                    
                     ApplyFiltersAndSort();
                     StatusMessage = $"Loaded {teams.Count} teams";
                 }
@@ -309,17 +328,6 @@ namespace NCAA_Power_Ratings.Mobile.ViewModels
                 team.ActiveSortValue = GetActiveSortValue(team);
 
             FilteredTeams = new ObservableCollection<TeamRanking>(result);
-        }
-
-        #endregion
-
-        #region INotifyPropertyChanged
-
-        public event PropertyChangedEventHandler? PropertyChanged;
-
-        protected void OnPropertyChanged([CallerMemberName] string? propertyName = null)
-        {
-            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
         }
 
         #endregion
