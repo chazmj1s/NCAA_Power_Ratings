@@ -17,6 +17,18 @@ namespace NCAA_Power_Ratings.Mobile.Views
                 YearPicker.SelectedIndex = yearIndex;
 
             FilterPicker.SelectedIndex = 0;
+
+            // TeamPicker is ItemsSource-bound; default to "All Teams" once names are loaded
+            viewModel.PropertyChanged += (s, e) =>
+            {
+                if (e.PropertyName == nameof(ScheduleViewModel.TeamNames))
+                {
+                    var picker = this.FindByName<Picker>("TeamPicker");
+                    if (picker != null && picker.SelectedIndex < 0)
+                        picker.SelectedIndex = 0;
+                }
+            };
+
             _pickersReady = true;
         }
 
@@ -39,11 +51,16 @@ namespace NCAA_Power_Ratings.Mobile.Views
         {
             if (!_pickersReady) return;
             if (sender is not Picker picker || picker.SelectedIndex < 0) return;
-
             var selected = picker.Items[picker.SelectedIndex];
-            if (selected.StartsWith("\u2500")) return; // separator row
-
+            if (selected.StartsWith("\u2500")) return;
             ViewModel.ApplyFilter(selected);
+        }
+
+        private void OnTeamFilterChanged(object sender, EventArgs e)
+        {
+            if (!_pickersReady) return;
+            if (sender is Picker picker && picker.SelectedItem is string team)
+                ViewModel.ApplyTeamFilter(team);
         }
     }
 }

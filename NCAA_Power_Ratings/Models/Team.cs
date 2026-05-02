@@ -25,5 +25,8 @@ namespace NCAA_Power_Ratings.Models
 
         [Column("ConferenceAbbr", TypeName = "varchar(10)")]
         public string? ConferenceAbbr { get; set; }
+
+        [Column("ShortName", TypeName = "varchar(20)")]
+        public string? ShortName { get; set; }
     }
 }

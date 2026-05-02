@@ -14,6 +14,7 @@
             <!-- Converters -->
             <converters:BoolToColorConverter x:Key="BoolToColorConverter" />
             <converters:BoolToBorderColorConverter x:Key="BoolToBorderColorConverter"/>
+            <converters:OddRowBackgroundConverter x:Key="OddRowBackgroundConverter"/>
         </ResourceDictionary>
     </Application.Resources>
 </Application>
