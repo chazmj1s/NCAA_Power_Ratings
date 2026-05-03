@@ -90,7 +90,7 @@ Rivalry: 118 meetings (STATE)
 
 ---
 
-### Test 4: Texas vs Oklahoma - Red River Showdown
+### Test 4: Texas vs Oklahoma - Red River Shootout
 ```
 Matchup: Texas N Oklahoma
 Prediction: Texas 27.5, Oklahoma 16.4
@@ -101,7 +101,7 @@ Team Record: 10-?
 Opponent Record: 10-?
 Team Power Rating: -0.1104
 Opponent Power Rating: 0.0276
-Rivalry: Red River Showdown (EPIC)
+Rivalry: Red River Shootout (EPIC)
 ```
 
 **Analysis:**

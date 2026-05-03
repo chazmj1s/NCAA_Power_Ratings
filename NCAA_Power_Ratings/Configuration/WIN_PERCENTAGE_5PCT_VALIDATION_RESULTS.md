@@ -107,7 +107,7 @@ Total: 50.1 points
 ---
 
 ## Test 3: Texas vs Oklahoma (Week 8)
-### Red River Showdown - EPIC Rivalry
+### Red River Shootout - EPIC Rivalry
 
 **Actual Result:**
 ```

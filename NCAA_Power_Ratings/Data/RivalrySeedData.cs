@@ -19,7 +19,7 @@ namespace NCAA_Power_Ratings.Data
                 // EPIC TIER - Expected variance ratio: 1.75x
                 new() { Team1Name = "Ohio State", Team2Name = "Michigan", RivalryName = "The Game", Tier = "EPIC", SeriesAge = 128 },
                 new() { Team1Name = "Alabama", Team2Name = "Auburn", RivalryName = "Iron Bowl", Tier = "EPIC", SeriesAge = 132 },
-                new() { Team1Name = "Texas", Team2Name = "Oklahoma", RivalryName = "Red River Showdown", Tier = "EPIC", SeriesAge = 125 },
+                new() { Team1Name = "Texas", Team2Name = "Oklahoma", RivalryName = "Red River Shootout", Tier = "EPIC", SeriesAge = 125 },
 
                 // NATIONAL TIER - Expected variance ratio: 1.5x
                 new() { Team1Name = "Army", Team2Name = "Navy", RivalryName = "125 meetings, never permanently cancelled", Tier = "NATIONAL", SeriesAge = 135 },

@@ -156,6 +156,24 @@ namespace NCAA_Power_Ratings.Mobile.Services
         }
 
         /// <summary>
+        /// Gets all named rivalries with series metadata.
+        /// Add this method to GameDataApiService.cs
+        /// </summary>
+        public async Task<List<Models.RivalryInfo>?> GetNamedRivalriesAsync()
+        {
+            try
+            {
+                var url = $"{_baseUrl}/rivalries/named";
+                return await _httpClient.GetFromJsonAsync<List<Models.RivalryInfo>>(url);
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"[API] Error getting named rivalries: {ex.Message}");
+                return null;
+            }
+        }
+
+        /// <summary>
         /// Updates game data for a specific week
         /// </summary>
         public async Task<bool> UpdateWeekGamesAsync(int year, int week)
