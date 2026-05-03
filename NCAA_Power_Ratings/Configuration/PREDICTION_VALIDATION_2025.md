@@ -18,7 +18,7 @@
 **Actual Result: Texas 23, Oklahoma 6 (Texas by 17)**
 - Location: Neutral (Cotton Bowl, Dallas)
 - Rankings: Texas #7, Oklahoma #13
-- Rivalry: EPIC (Red River Showdown)
+- Rivalry: EPIC (Red River Shootout)
 
 ---
 

@@ -45,14 +45,16 @@ public static class MauiProgram
 		builder.Services.AddTransient<PowerRankingsViewModel>();
 		builder.Services.AddTransient<ScheduleViewModel>();
 		builder.Services.AddTransient<TeamsViewModel>();
+        builder.Services.AddTransient<RivalriesViewModel>();
 
-		// Register Pages
-		builder.Services.AddTransient<PowerRankingsPage>();
+        // Register Pages
+        builder.Services.AddTransient<PowerRankingsPage>();
 		builder.Services.AddTransient<SchedulePage>();
 		builder.Services.AddTransient<TeamsPage>();
+		builder.Services.AddTransient<RivalriesPage>();
 
 #if DEBUG
-		builder.Logging.AddDebug();
+        builder.Logging.AddDebug();
 #endif
 
 		return builder.Build();

@@ -27,6 +27,12 @@
             Route="TeamsPage" />
 
         <ShellContent
+            Title="Rivalries"
+            Icon="trophy.png"
+            ContentTemplate="{DataTemplate views:RivalriesPage}"
+            Route="RivalriesPage" />
+
+        <ShellContent
             Title="Home"
             Icon="home.png"
             ContentTemplate="{DataTemplate local:MainPage}"
