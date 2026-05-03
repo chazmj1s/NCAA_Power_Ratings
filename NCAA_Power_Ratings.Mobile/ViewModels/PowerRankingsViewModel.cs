@@ -24,6 +24,7 @@ namespace NCAA_Power_Ratings.Mobile.ViewModels
         private int _selectedYear;
         private string _selectedConferenceFilter = "All";
 
+
         public PowerRankingsViewModel(GameDataApiService apiService, FollowService followService)
             : base(followService)
         {
@@ -129,6 +130,7 @@ namespace NCAA_Power_Ratings.Mobile.ViewModels
                 OnPropertyChanged();
             }
         }
+        public bool HasLoaded { get; private set; }
 
         #endregion
 
@@ -175,6 +177,8 @@ namespace NCAA_Power_Ratings.Mobile.ViewModels
                     System.Diagnostics.Debug.WriteLine("[PowerRankings] No teams returned from API");
                     StatusMessage = "Failed to load rankings";
                 }
+                
+                HasLoaded = true;
             }
             catch (Exception ex)
             {

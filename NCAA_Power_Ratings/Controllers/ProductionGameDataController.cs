@@ -485,10 +485,8 @@ namespace NCAA_Power_Ratings.Controllers
 
                 var avgScoreDeltas = await context.AvgScoreDeltas.ToListAsync();
 
-                // Compute league average from all games this season
-                var avgTeamScore = games.Count > 0
-                    ? (games.Average(g => g.WPoints) + games.Average(g => g.LPoints)) / 2.0
-                    : 28.0;
+                // Fallback average score if team records are unavailable
+                const double fallbackScore = 28.0;
 
                 var results = games.Select(g =>
                 {
@@ -496,16 +494,15 @@ namespace NCAA_Power_Ratings.Controllers
                     teams.TryGetValue(g.LoserId, out var loser);
 
                     var winnerConf = winner?.ConferenceAbbr ?? winner?.Conference ?? "";
-                    var loserConf  = loser?.ConferenceAbbr  ?? loser?.Conference  ?? "";
+                    var loserConf = loser?.ConferenceAbbr ?? loser?.Conference ?? "";
                     var winnerTier = GetConferenceTier(winner?.Conference, winner?.TeamName);
-                    var loserTier  = GetConferenceTier(loser?.Conference,  loser?.TeamName);
+                    var loserTier = GetConferenceTier(loser?.Conference, loser?.TeamName);
 
-                    // Projected scores: use pre-season (or prior year) records so the
-                    // projection reflects what was knowable before the game was played.
+                    // Projected scores: use team-specific PPG/PAG baselines so each
+                    // matchup reflects the actual offensive/defensive profiles of both teams.
                     double? projWinner = null, projLoser = null;
                     try
                     {
-                        // Pick up the running record for this team (full-season approximation)
                         var wrec = teamRecords.GetValueOrDefault(g.WinnerId)
                                    ?? priorYearRecords.GetValueOrDefault(g.WinnerId);
                         var lrec = teamRecords.GetValueOrDefault(g.LoserId)
@@ -515,6 +512,18 @@ namespace NCAA_Power_Ratings.Controllers
                         {
                             var wGames = wrec.Wins + wrec.Losses;
                             var lGames = lrec.Wins + lrec.Losses;
+
+                            // Team-specific scoring baselines (PPG / PAG)
+                            var wPPG = wGames > 0 ? wrec.PointsFor / (double)wGames : fallbackScore;
+                            var wPAG = wGames > 0 ? wrec.PointsAgainst / (double)wGames : fallbackScore;
+                            var lPPG = lGames > 0 ? lrec.PointsFor / (double)lGames : fallbackScore;
+                            var lPAG = lGames > 0 ? lrec.PointsAgainst / (double)lGames : fallbackScore;
+
+                            // Blend each team's offense against opponent's defense
+                            var wBaseScore = (wPPG + lPAG) / 2.0;
+                            var lBaseScore = (lPPG + wPAG) / 2.0;
+
+                            // Win-pct delta lookup
                             var wWinPct = wGames > 0
                                 ? Math.Round((decimal)wrec.Wins / wGames * 20m, MidpointRounding.AwayFromZero) / 20m
                                 : 0m;
@@ -530,53 +539,55 @@ namespace NCAA_Power_Ratings.Controllers
                                 ? Math.Max(-35.0, Math.Min(35.0, (double)asd.AverageScoreDelta))
                                 : 7.0;
 
-                            // Winner perspective
+                            // Delta from winner's perspective
                             var deltaFromWinner = wWinPct >= lWinPct ? delta : -delta;
 
-                            // Home field: 'W' = winner is home, 'L' = loser is home, 'N' = neutral
+                            // Home field advantage: 'W' = winner is home, 'L' = loser is home
                             var hfa = g.Location == 'W' ? 2.5 : g.Location == 'L' ? -2.5 : 0.0;
                             deltaFromWinner += hfa;
 
                             // Power rating adjustment
-                            if (wrec.Ranking.HasValue && lrec.Ranking.HasValue)
+                            if (wrec.PowerRating.HasValue && lrec.PowerRating.HasValue)
                             {
-                                var ratingDiff = (double)(wrec.Ranking.Value - lrec.Ranking.Value);
-                                deltaFromWinner += ratingDiff * 0.15;
+                                var prDiff = (double)(wrec.PowerRating.Value - lrec.PowerRating.Value);
+                                deltaFromWinner += prDiff * 10.0;
                             }
 
-                            projWinner = Math.Round(avgTeamScore + deltaFromWinner / 2.0, 1);
-                            projLoser  = Math.Round(avgTeamScore - deltaFromWinner / 2.0, 1);
+                            projWinner = Math.Max(0, Math.Round(wBaseScore + deltaFromWinner / 2.0, 1));
+                            projLoser = Math.Max(0, Math.Round(lBaseScore - deltaFromWinner / 2.0, 1));
                         }
                     }
                     catch { /* projection unavailable */ }
 
-                    var actualOU  = g.WPoints + g.LPoints;
-                    var projOU    = projWinner.HasValue && projLoser.HasValue
-                                    ? Math.Round(projWinner.Value + projLoser.Value, 1)
-                                    : (double?)null;
+                    var actualOU = g.WPoints + g.LPoints;
+                    var projOU = projWinner.HasValue && projLoser.HasValue
+                                   ? Math.Round(projWinner.Value + projLoser.Value, 1)
+                                   : (double?)null;
 
                     return new
                     {
                         g.Id,
                         g.Year,
                         g.Week,
-                        WinnerName      = g.WinnerName,
+                        GameDate = g.GameDate,
+                        GameDay = g.GameDay,
+                        WinnerName = g.WinnerName,
                         WinnerShortName = winner?.ShortName ?? g.WinnerName,
-                        WinnerId        = g.WinnerId,
-                        WinnerConf      = winnerConf,
-                        WinnerTier      = winnerTier,
-                        WPoints         = g.WPoints,
-                        LoserName       = g.LoserName,
-                        LoserShortName  = loser?.ShortName ?? g.LoserName,
-                        LoserId         = g.LoserId,
-                        LoserConf       = loserConf,
-                        LoserTier       = loserTier,
-                        LPoints         = g.LPoints,
+                        WinnerId = g.WinnerId,
+                        WinnerConf = winnerConf,
+                        WinnerTier = winnerTier,
+                        WPoints = g.WPoints,
+                        LoserName = g.LoserName,
+                        LoserShortName = loser?.ShortName ?? g.LoserName,
+                        LoserId = g.LoserId,
+                        LoserConf = loserConf,
+                        LoserTier = loserTier,
+                        LPoints = g.LPoints,
                         g.Location,
-                        ActualOU        = actualOU,
+                        ActualOU = actualOU,
                         ProjWinnerScore = projWinner,
-                        ProjLoserScore  = projLoser,
-                        ProjOU          = projOU
+                        ProjLoserScore = projLoser,
+                        ProjOU = projOU
                     };
                 }).ToList();
 

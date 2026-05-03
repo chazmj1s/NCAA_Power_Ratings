@@ -1,66 +1,41 @@
+using System.ComponentModel;
 using NCAA_Power_Ratings.Mobile.ViewModels;
 
 namespace NCAA_Power_Ratings.Mobile.Views
 {
     public partial class SchedulePage : ContentPage
     {
-        private ScheduleViewModel ViewModel => (ScheduleViewModel)BindingContext;
-        private bool _pickersReady = false;
+        private readonly ScheduleViewModel _viewModel;
 
         public SchedulePage(ScheduleViewModel viewModel)
         {
             InitializeComponent();
             BindingContext = viewModel;
+            _viewModel = viewModel;
+            _viewModel.PropertyChanged += OnViewModelPropertyChanged;
+        }
 
-            var yearIndex = 2025 - 2021;
-            if (yearIndex >= 0 && yearIndex < YearPicker.Items.Count)
-                YearPicker.SelectedIndex = yearIndex;
+        private void OnViewModelPropertyChanged(object sender, PropertyChangedEventArgs e)
+        {
+            if (e.PropertyName == nameof(ScheduleViewModel.SelectedWeek))
+                ScrollToSelectedWeek();
+        }
 
-            FilterPicker.SelectedIndex = 0;
+        private void ScrollToSelectedWeek()
+        {
+            var weeks = _viewModel.Weeks;
+            var selected = _viewModel.SelectedWeek;
+            var index = weeks.ToList().FindIndex(w => w.Week == selected);
+            if (index < 0) return;
 
-            // TeamPicker is ItemsSource-bound; default to "All Teams" once names are loaded
-            viewModel.PropertyChanged += (s, e) =>
+            const double itemWidth = 48.0;
+            var scrollX = Math.Max(0, (index * itemWidth) - 160);
+
+            MainThread.BeginInvokeOnMainThread(async () =>
             {
-                if (e.PropertyName == nameof(ScheduleViewModel.TeamNames))
-                {
-                    var picker = this.FindByName<Picker>("TeamPicker");
-                    if (picker != null && picker.SelectedIndex < 0)
-                        picker.SelectedIndex = 0;
-                }
-            };
-
-            _pickersReady = true;
-        }
-
-        protected override async void OnAppearing()
-        {
-            base.OnAppearing();
-            if (BindingContext is ScheduleViewModel vm)
-                await vm.LoadDataAsync();
-        }
-
-        private void OnYearChanged(object sender, EventArgs e)
-        {
-            if (!_pickersReady) return;
-            if (sender is Picker picker && picker.SelectedIndex >= 0)
-                if (int.TryParse(picker.Items[picker.SelectedIndex], out int year))
-                    ViewModel.SelectedYear = year;
-        }
-
-        private void OnFilterChanged(object sender, EventArgs e)
-        {
-            if (!_pickersReady) return;
-            if (sender is not Picker picker || picker.SelectedIndex < 0) return;
-            var selected = picker.Items[picker.SelectedIndex];
-            if (selected.StartsWith("\u2500")) return;
-            ViewModel.ApplyFilter(selected);
-        }
-
-        private void OnTeamFilterChanged(object sender, EventArgs e)
-        {
-            if (!_pickersReady) return;
-            if (sender is Picker picker && picker.SelectedItem is string team)
-                ViewModel.ApplyTeamFilter(team);
+                await Task.Delay(100);
+                await WeekScrollView.ScrollToAsync(scrollX, 0, animated: true);
+            });
         }
     }
 }

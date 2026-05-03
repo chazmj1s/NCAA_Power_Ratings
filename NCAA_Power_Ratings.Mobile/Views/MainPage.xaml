@@ -1,0 +1,92 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             xmlns:viewmodels="clr-namespace:NCAA_Power_Ratings.Mobile.ViewModels"
+             x:Class="NCAA_Power_Ratings.Mobile.Views.MainPage"
+             x:Name="ThisPage"
+             Shell.NavBarIsVisible="False">
+
+  <Grid RowDefinitions="Auto,Auto,*"
+        BackgroundColor="{AppThemeBinding Light=#1A1A2E, Dark=#0D0D1A}">
+
+    <!-- ═══════════════════════════════════════════════════ -->
+    <!-- APP TITLE                                           -->
+    <!-- ═══════════════════════════════════════════════════ -->
+    <Label Grid.Row="0"
+           Text="NCAA Power Ratings"
+           FontSize="16"
+           FontAttributes="Bold"
+           Padding="12,8"
+           HorizontalOptions="Center"
+           HorizontalTextAlignment="Center"
+           TextColor="White" />
+
+    <!-- ═══════════════════════════════════════════════════ -->
+    <!-- TOP NAV: scrollable tab strip                       -->
+    <!-- ═══════════════════════════════════════════════════ -->
+    <ScrollView Grid.Row="1"
+                Orientation="Horizontal"
+                HorizontalScrollBarVisibility="Never">
+      <HorizontalStackLayout Spacing="0"
+                             Padding="6,0"
+                             BindableLayout.ItemsSource="{Binding TabItems}">
+        <BindableLayout.ItemTemplate>
+          <DataTemplate x:DataType="viewmodels:TabItem">
+            <Grid Padding="2,0" MinimumWidthRequest="72">
+              <VerticalStackLayout Spacing="0">
+
+                <Label Text="{Binding Label}"
+                       FontSize="13"
+                       FontAttributes="Bold"
+                       HorizontalOptions="Center"
+                       Padding="12,10">
+                  <Label.Triggers>
+                    <DataTrigger TargetType="Label"
+                                 Binding="{Binding IsSelected}"
+                                 Value="True">
+                      <Setter Property="TextColor" Value="White" />
+                    </DataTrigger>
+                    <DataTrigger TargetType="Label"
+                                 Binding="{Binding IsSelected}"
+                                 Value="False">
+                      <Setter Property="TextColor" Value="#888899" />
+                    </DataTrigger>
+                  </Label.Triggers>
+                </Label>
+
+                <!-- Active underline -->
+                <BoxView HeightRequest="2"
+                         HorizontalOptions="Fill"
+                         IsVisible="{Binding IsSelected}"
+                         Color="#9B7EDE" />
+
+              </VerticalStackLayout>
+              <Grid.GestureRecognizers>
+                <TapGestureRecognizer
+                    Command="{Binding Source={x:Reference ThisPage}, Path=BindingContext.SelectTabCommand}"
+                    CommandParameter="{Binding Index}" />
+              </Grid.GestureRecognizers>
+            </Grid>
+          </DataTemplate>
+        </BindableLayout.ItemTemplate>
+      </HorizontalStackLayout>
+    </ScrollView>
+
+    <!-- ═══════════════════════════════════════════════════ -->
+    <!-- PAGE HOST: visibility-swapped pages                 -->
+    <!-- Pages are injected from code-behind via DI.         -->
+    <!-- The Grid here is just a named container.            -->
+    <!-- ═══════════════════════════════════════════════════ -->
+    <Grid Grid.Row="2"
+          x:Name="PageHost"
+          BackgroundColor="{AppThemeBinding Light=#FFFFFF, Dark=#121212}">
+      <Grid.GestureRecognizers>
+        <SwipeGestureRecognizer Direction="Left"
+                                Command="{Binding NextTabCommand}" />
+        <SwipeGestureRecognizer Direction="Right"
+                                Command="{Binding PreviousTabCommand}" />
+      </Grid.GestureRecognizers>
+    </Grid>
+
+  </Grid>
+</ContentPage>
