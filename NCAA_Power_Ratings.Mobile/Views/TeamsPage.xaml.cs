@@ -17,7 +17,7 @@ namespace NCAA_Power_Ratings.Mobile.Views
         {
             base.OnAppearing();
             if (_viewModel.Teams.Count == 0)
-                await _viewModel.LoadAsync();
+                await _viewModel.LoadDataAsync();
         }
     }
 }

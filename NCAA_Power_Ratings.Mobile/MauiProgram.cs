@@ -26,6 +26,7 @@ public static class MauiProgram
 		builder.Services.AddHttpClient();
         builder.Services.AddSingleton<FollowService>();
 
+
         // Register Services with HttpClient factory
         builder.Services.AddSingleton<GameDataApiService>(sp => 
 		{
@@ -46,12 +47,15 @@ public static class MauiProgram
 		builder.Services.AddTransient<ScheduleViewModel>();
 		builder.Services.AddTransient<TeamsViewModel>();
         builder.Services.AddTransient<RivalriesViewModel>();
+        builder.Services.AddSingleton<MainViewModel>();
 
         // Register Pages
         builder.Services.AddTransient<PowerRankingsPage>();
 		builder.Services.AddTransient<SchedulePage>();
 		builder.Services.AddTransient<TeamsPage>();
 		builder.Services.AddTransient<RivalriesPage>();
+        builder.Services.AddSingleton<MainPage>();
+        builder.Services.AddTransient<ConfigPage>();
 
 #if DEBUG
         builder.Logging.AddDebug();

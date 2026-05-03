@@ -53,6 +53,8 @@ namespace NCAA_Power_Ratings.Mobile.ViewModels
             get => _statusMessage;
             set { _statusMessage = value; OnPropertyChanged(); }
         }
+        
+        public bool HasLoaded { get; private set; }
 
         public TeamsViewModel(GameDataApiService apiService, FollowService followService)
     : base(followService)
@@ -63,7 +65,7 @@ namespace NCAA_Power_Ratings.Mobile.ViewModels
             _followService.TeamFollowChanged += OnTeamFollowChanged;
         }
 
-        public async Task LoadAsync()
+        public async Task LoadDataAsync()
         {
             IsLoading = true;
             StatusMessage = string.Empty;
@@ -86,6 +88,8 @@ namespace NCAA_Power_Ratings.Mobile.ViewModels
                 OnPropertyChanged(nameof(SelectedConference));
 
                 ApplyFilter();
+                HasLoaded = true;
+
             }
             catch (Exception ex)
             {

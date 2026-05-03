@@ -17,7 +17,7 @@ namespace NCAA_Power_Ratings.Mobile.Models
         public int SequenceNumber { get; set; }
 
         /// <summary>True for odd sequence numbers — drives alternating row background.</summary>
-        public bool IsOddRow => SequenceNumber % 2 != 0;
+        public bool IsOddRow => SequenceNumber % 2 == 1;
 
         /// <summary>True if the game has been played.</summary>
         public bool IsPlayed => WPoints > 0 || LPoints > 0;
@@ -52,7 +52,7 @@ namespace NCAA_Power_Ratings.Mobile.Models
         // --- Actual display ---
         public string Score => $"{WPoints}-{LPoints}";
         public int ActualMargin => WPoints - LPoints;
-        public string DisplayOU => $"{ActualOU}";
+        public string DisplayOUold => $"{ActualOU}";
 
         // --- Projected display (all rounded to nearest integer) ---
         public bool HasProjection => ProjWinnerScore.HasValue && ProjLoserScore.HasValue;
@@ -84,6 +84,33 @@ namespace NCAA_Power_Ratings.Mobile.Models
         public string HomeScore => IsPlayed
             ? (HomeIsWinner ? WPoints.ToString() : LPoints.ToString())
             : "–";
+
+        public string ProjVisitorScore => HomeIsWinner
+            ? (ProjLoserScore.HasValue ? $"{(int)Math.Round(ProjLoserScore.Value)}" : "–")
+            : (ProjWinnerScore.HasValue ? $"{(int)Math.Round(ProjWinnerScore.Value)}" : "–");
+
+        public string ProjHomeScore => HomeIsWinner
+            ? (ProjWinnerScore.HasValue ? $"{(int)Math.Round(ProjWinnerScore.Value)}" : "–")
+            : (ProjLoserScore.HasValue ? $"{(int)Math.Round(ProjLoserScore.Value)}" : "–");
+        // Visitor score: "20 (18)" or "(18)" if unplayed
+        public string DisplayVisitorScore => IsPlayed
+            ? $"{VisitorScore} ({ProjVisitorScore})"
+            : $"({ProjVisitorScore})";
+
+        // Home score: "23 (35)" or "(35)" if unplayed  
+        public string DisplayHomeScore => IsPlayed
+            ? $"{HomeScore} ({ProjHomeScore})"
+            : $"({ProjHomeScore})";
+
+        // Margin on visitor row: "margin: 3 (-9)" or "margin: (-9)"
+        public string DisplayMargin => IsPlayed
+            ? $"margin: {ActualMargin} ({DisplayProjMargin})"
+            : $"margin: ({DisplayProjMargin})";
+
+        // O/U on home row: "O/U: 43 (53)" or "O/U: (53)"
+        public string DisplayOU => IsPlayed
+            ? $"O/U: {ActualOU} ({DisplayProjOU})"
+            : $"O/U: ({DisplayProjOU})";
 
         /// <summary>Visitor team ID for follow/star.</summary>
         public int VisitorId => HomeIsWinner ? LoserId : WinnerId;
@@ -118,6 +145,13 @@ namespace NCAA_Power_Ratings.Mobile.Models
 
         /// <summary>Neutral site indicator for display.</summary>
         public string NeutralIndicator => NeutralSite ? " (N)" : string.Empty;
+
+        private bool _showGroupHeader;
+        public bool ShowGroupHeader
+        {
+            get => _showGroupHeader;
+            set { _showGroupHeader = value; OnPropertyChanged(); }
+        }
 
         // --- Follow state ---
         private bool _winnerIsFollowed;

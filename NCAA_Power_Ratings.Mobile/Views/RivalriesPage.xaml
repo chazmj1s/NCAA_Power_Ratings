@@ -3,10 +3,9 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
              xmlns:models="clr-namespace:NCAA_Power_Ratings.Mobile.Models"
              x:Class="NCAA_Power_Ratings.Mobile.Views.RivalriesPage"
-             x:Name="ThisPage"
-             Title="Rivalries">
+             x:Name="ThisPage">
 
-  <Grid RowDefinitions="Auto,Auto,*,24">
+    <Grid RowDefinitions="Auto,Auto,*,24">
 
     <!-- Tier filter bar -->
     <Grid Grid.Row="0"
