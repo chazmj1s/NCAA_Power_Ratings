@@ -12,7 +12,6 @@ namespace NCAA_Power_Ratings.Extensions
         /// <param name="cells">Array of game data fields</param>
         /// <param name="yearIn">Year as string for ID generation</param>
         /// <param name="teams">Collection of teams for ID lookup</param>
-        /// <param name="map">Column mapping for the year</param>
         /// <returns>A new Game object populated from the array data</returns>
         public static Game ToGame(this string[] cells, string yearIn, IEnumerable<Team> teams)
         {
@@ -29,7 +28,7 @@ namespace NCAA_Power_Ratings.Extensions
             int winnerId = teams.FirstOrDefault(t => winnerName.Equals(t.TeamName.Trim()) ||
                                          (t.Alias != null && t.Alias.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries)
                            .Any(a => winnerName.Equals(a, StringComparison.OrdinalIgnoreCase))))?.TeamID ?? xIdx;
-            
+
             int loserId = teams.FirstOrDefault(t => loserName.Equals(t.TeamName.Trim()) ||
                                         (t.Alias != null && t.Alias.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries)
                            .Any(a => loserName.Equals(a, StringComparison.OrdinalIgnoreCase))))?.TeamID ?? xIdx;
@@ -38,11 +37,23 @@ namespace NCAA_Power_Ratings.Extensions
             var siteCellText = cells[map.Location].Trim();
             char siteIndicator = siteCellText.Contains('@') ? 'L' : siteCellText.Contains('N') ? 'N' : 'W';
 
+            // Parse date — stored as-is from file e.g. "Aug 23 2025"
+            var gameDate = cells.Length > map.Date
+                ? cells[map.Date].Trim()
+                : null;
+
+            // Parse day — e.g. "Sat", "Fri", "Thu"
+            var gameDay = cells.Length > map.Day
+                ? cells[map.Day].Trim()
+                : null;
+
             // Create and return the Game object
             return new Game
             {
                 Id = int.TryParse(yearIn + cells[map.RowId].Trim(), out int id) ? id : 0,
                 Week = int.TryParse(cells[map.Week].Trim(), out int week) ? week : 0,
+                GameDate = gameDate,
+                GameDay = gameDay,
                 WinnerId = winnerId,
                 WinnerName = winnerName,
                 WPoints = int.TryParse(cells[map.WPoints].Trim(), out int wpoints) ? wpoints : 0,

@@ -16,6 +16,12 @@ namespace NCAA_Power_Ratings.Models
         [Column("Week")]
         public int Week { get; set; }
 
+        [Column("GameDate", TypeName = "varchar(20)")]
+        public string? GameDate { get; set; }
+
+        [Column("GameDay", TypeName = "varchar(3)")]
+        public string? GameDay { get; set; }
+
         [Column("WinnerId")]
         public int WinnerId { get; set; }
 
@@ -39,8 +45,20 @@ namespace NCAA_Power_Ratings.Models
         [Column("Location")]
         public char Location { get; set; }
 
-        // computed property - do not map to the database
+        // Derived: true if the game has been played
         [NotMapped]
-        public int Spread { get { return WPoints - LPoints; } }
+        public bool IsPlayed => WPoints > 0 || LPoints > 0;
+
+        // Derived: spread
+        [NotMapped]
+        public int Spread => WPoints - LPoints;
+
+        // Derived: home team is winner when Location == 'W'
+        [NotMapped]
+        public bool HomeIsWinner => Location == 'W';
+
+        // Derived: neutral site
+        [NotMapped]
+        public bool NeutralSite => Location == 'N';
     }
 }

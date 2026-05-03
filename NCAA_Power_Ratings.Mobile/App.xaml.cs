@@ -10,14 +10,18 @@ public partial class App : Application
 		InitializeComponent();
 	}
 
-	protected override Window CreateWindow(IActivationState? activationState)
-	{
-		var window = new Window(new AppShell());
+    protected override Window CreateWindow(IActivationState? activationState)
+    {
+        var window = new Window(new AppShell());
 
-		// Default to iPhone 16 Pro Max portrait dimensions (430 x 932 points)
-		window.Width = 430;
-		window.Height = 932;
+        // On Windows dev machine, emulate iPhone 11 portrait dimensions (414 x 896 points)
+        // On real iOS/Android devices, let the OS handle sizing naturally
+        if (DeviceInfo.Platform == DevicePlatform.WinUI)
+        {
+            window.Width = 414;
+            window.Height = 896;
+        }
 
-		return window;
-	}
+        return window;
+    }
 }
