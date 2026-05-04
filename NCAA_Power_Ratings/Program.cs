@@ -1,3 +1,4 @@
+using Microsoft.Build.Framework;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Options;
@@ -33,6 +34,7 @@ builder.Services.AddTransient<ScoreDeltaCalculator>();
 builder.Services.AddTransient<TeamMetricsService>();
 builder.Services.AddTransient<MatchupHistoryCalculator>();
 builder.Services.AddTransient<GamePredictionService>();
+builder.Services.AddSingleton<ProjectionCacheService>();
 
 // Add services to the container.
 builder.Services.AddControllersWithViews();

@@ -3,6 +3,7 @@ using Microsoft.EntityFrameworkCore;
 using NCAA_Power_Ratings.Data;
 using NCAA_Power_Ratings.Models;
 using NCAA_Power_Ratings.Services;
+using NCAA_Power_Ratings.TempModels;
 
 namespace NCAA_Power_Ratings.Controllers
 {
@@ -14,10 +15,11 @@ namespace NCAA_Power_Ratings.Controllers
     public class ProductionGameDataController(
     IDbContextFactory<NCAAContext> contextFactory,
     ILogger<ProductionGameDataController> logger,
-    GamePredictionService predictionService) : ControllerBase
+    GamePredictionService predictionService,
+    ProjectionCacheService projectionCache) : ControllerBase
     {
         private readonly GamePredictionService _predictionService = predictionService;
-
+        private readonly ProjectionCacheService _projectionCache = projectionCache;
 
         /// <summary>
         /// Predicts the score for a single matchup between two teams.
@@ -450,7 +452,8 @@ namespace NCAA_Power_Ratings.Controllers
         /// Example: GET /api/productiongamedata/schedule?year=2025
         /// </summary>
         [HttpGet("schedule")]
-        public async Task<IActionResult> GetSchedule([FromQuery] int? year)
+        public async Task<IActionResult> GetSchedule([FromQuery] int? year,
+    CancellationToken token = default)
         {
             try
             {
@@ -491,6 +494,10 @@ namespace NCAA_Power_Ratings.Controllers
 
                 // Fallback average score if team records are unavailable
                 const double fallbackScore = 28.0;
+                
+                // ── Get projections from cache (single source of truth) ───────────
+                var allProjections = await _projectionCache.GetAllProjections(targetYear, token);
+
 
                 var results = games.Select(g =>
                 {
@@ -507,61 +514,13 @@ namespace NCAA_Power_Ratings.Controllers
                     double? projWinner = null, projLoser = null;
                     try
                     {
-                        var wrec = teamRecords.GetValueOrDefault(g.WinnerId)
-                                   ?? priorYearRecords.GetValueOrDefault(g.WinnerId);
-                        var lrec = teamRecords.GetValueOrDefault(g.LoserId)
-                                   ?? priorYearRecords.GetValueOrDefault(g.LoserId);
-
-                        if (wrec != null && lrec != null)
+                        if (allProjections.TryGetValue(g.Id, out var pred))
                         {
-                            var wGames = wrec.Wins + wrec.Losses;
-                            var lGames = lrec.Wins + lrec.Losses;
-
-                            // Team-specific scoring baselines (PPG / PAG)
-                            var wPPG = wGames > 0 ? wrec.PointsFor / (double)wGames : fallbackScore;
-                            var wPAG = wGames > 0 ? wrec.PointsAgainst / (double)wGames : fallbackScore;
-                            var lPPG = lGames > 0 ? lrec.PointsFor / (double)lGames : fallbackScore;
-                            var lPAG = lGames > 0 ? lrec.PointsAgainst / (double)lGames : fallbackScore;
-
-                            // Blend each team's offense against opponent's defense
-                            var wBaseScore = (wPPG + lPAG) / 2.0;
-                            var lBaseScore = (lPPG + wPAG) / 2.0;
-
-                            // Win-pct delta lookup
-                            var wWinPct = wGames > 0
-                                ? Math.Round((decimal)wrec.Wins / wGames * 20m, MidpointRounding.AwayFromZero) / 20m
-                                : 0m;
-                            var lWinPct = lGames > 0
-                                ? Math.Round((decimal)lrec.Wins / lGames * 20m, MidpointRounding.AwayFromZero) / 20m
-                                : 0m;
-
-                            var maxPct = Math.Max(wWinPct, lWinPct);
-                            var minPct = Math.Min(wWinPct, lWinPct);
-                            var asd = avgScoreDeltas.FirstOrDefault(
-                                a => a.Team1WinPct == maxPct && a.Team2WinPct == minPct);
-                            var delta = asd != null && asd.SampleSize >= 10
-                                ? Math.Max(-35.0, Math.Min(35.0, (double)asd.AverageScoreDelta))
-                                : 7.0;
-
-                            // Delta from winner's perspective
-                            var deltaFromWinner = wWinPct >= lWinPct ? delta : -delta;
-
-                            // Home field advantage: 'W' = winner is home, 'L' = loser is home
-                            var hfa = g.Location == 'W' ? 2.5 : g.Location == 'L' ? -2.5 : 0.0;
-                            deltaFromWinner += hfa;
-
-                            // Power rating adjustment
-                            if (wrec.PowerRating.HasValue && lrec.PowerRating.HasValue)
-                            {
-                                var prDiff = (double)(wrec.PowerRating.Value - lrec.PowerRating.Value);
-                                deltaFromWinner += prDiff * 10.0;
-                            }
-
-                            projWinner = Math.Max(0, Math.Round(wBaseScore + deltaFromWinner / 2.0, 1));
-                            projLoser = Math.Max(0, Math.Round(lBaseScore - deltaFromWinner / 2.0, 1));
+                            projWinner = Math.Max(0, Math.Round(pred.PredictedTeamScore, 1));
+                            projLoser = Math.Max(0, Math.Round(pred.PredictedOpponentScore, 1));
                         }
                     }
-                    catch { /* projection unavailable */ }
+                    catch { }
 
                     var actualOU = g.WPoints + g.LPoints;
                     var projOU = projWinner.HasValue && projLoser.HasValue
@@ -594,6 +553,7 @@ namespace NCAA_Power_Ratings.Controllers
                         ProjOU = projOU
                     };
                 }).ToList();
+
 
                 return Ok(results);
             }
@@ -1026,6 +986,13 @@ namespace NCAA_Power_Ratings.Controllers
                             r.Qualifier2.OverallLosses,
                             r.Qualifier2.Division
                         },
+                        Contenders = r.Contenders.Select(c => new
+                        {
+                            c.TeamName,
+                            c.ConferenceWins,
+                            c.ConferenceLosses,
+                            c.ConferenceRecord
+                        }).ToList(),
                         r.Qualifier1Method,
                         r.Qualifier2Method,
                         r.TiebreakerLog,
@@ -1033,8 +1000,7 @@ namespace NCAA_Power_Ratings.Controllers
                         SimulatedThrough = throughWeek.HasValue
                             ? $"Week {throughWeek} (weeks {throughWeek + 1}-15 projected)"
                             : "Full season actual results"
-                    })
-                    .ToList();
+                    });
 
                 return Ok(results);
             }
@@ -1062,10 +1028,10 @@ namespace NCAA_Power_Ratings.Controllers
         /// </summary>
         [HttpGet("projected-standings")]
         public async Task<IActionResult> GetProjectedStandings(
-            [FromQuery] int? year,
-            [FromQuery] int? throughWeek,
-            [FromQuery] string conference = null,
-            CancellationToken token = default)
+    [FromQuery] int? year,
+    [FromQuery] int? throughWeek,
+    [FromQuery] string conference = null,
+    CancellationToken token = default)
         {
             try
             {
@@ -1077,18 +1043,15 @@ namespace NCAA_Power_Ratings.Controllers
                     .Where(tr => tr.Year == targetYear)
                     .ToDictionaryAsync(tr => tr.TeamID, token);
 
-                // FBS team IDs
                 var fbsTeamIds = teams.Values
                     .Where(t => t.Division == "FBS")
                     .Select(t => t.TeamID)
                     .ToHashSet();
 
-                // All regular season games
                 var allGames = await context.Games
                     .Where(g => g.Year == targetYear && g.Week < 16)
                     .ToListAsync(token);
 
-                // Conference game predicate
                 bool IsConfGame(Game g) =>
                     fbsTeamIds.Contains(g.WinnerId) &&
                     fbsTeamIds.Contains(g.LoserId) &&
@@ -1097,7 +1060,6 @@ namespace NCAA_Power_Ratings.Controllers
                     !string.IsNullOrEmpty(w.ConferenceAbbr) &&
                     w.ConferenceAbbr == l.ConferenceAbbr;
 
-                // Split played vs unplayed
                 var playedConfGames = allGames
                     .Where(g => IsConfGame(g) &&
                                 (g.WPoints > 0 || g.LPoints > 0) &&
@@ -1110,27 +1072,8 @@ namespace NCAA_Power_Ratings.Controllers
                                  throughWeek.HasValue && g.Week > throughWeek.Value))
                     .ToList();
 
-                // ── Project unplayed games ────────────────────────────────────────
-                var matchupRequests = unplayedConfGames
-                    .Where(g => teams.ContainsKey(g.WinnerId) && teams.ContainsKey(g.LoserId))
-                    .Select(g => new MatchupRequest
-                    {
-                        TeamName = teams[g.WinnerId].TeamName,
-                        OpponentName = teams[g.LoserId].TeamName,
-                        Location = g.Location,
-                        Week = g.Week
-                    })
-                    .ToList();
-
-                var predictions = matchupRequests.Any()
-                    ? await predictionService.PredictMatchups(targetYear, matchupRequests, token)
-                    : new List<GamePrediction>();
-
-                // Key: "TeamName|OpponentName" → prediction
-                var predictionMap = predictions.ToDictionary(
-                    p => $"{p.TeamName}|{p.OpponentName}",
-                    p => p
-                );
+                // ── Get projections from cache (single source of truth) ───────────
+                var allProjections = await _projectionCache.GetAllProjections(targetYear, token);
 
                 // ── Build per-team projected schedule ─────────────────────────────
                 var targetTeams = teams.Values
@@ -1144,11 +1087,9 @@ namespace NCAA_Power_Ratings.Controllers
 
                 var teamResults = targetTeams.Select(team =>
                 {
-                    // All conference games involving this team
                     var teamConfGames = allGames
                         .Where(g => IsConfGame(g) &&
-                                    (g.WinnerId == team.TeamID || g.LoserId == team.TeamID) &&
-                                    g.Week < 16)
+                                    (g.WinnerId == team.TeamID || g.LoserId == team.TeamID))
                         .OrderBy(g => g.Week)
                         .ToList();
 
@@ -1165,13 +1106,12 @@ namespace NCAA_Power_Ratings.Controllers
                         var oppName = opp?.ShortName ?? opp?.TeamName ?? "Unknown";
 
                         bool isPlayed = (g.WPoints > 0 || g.LPoints > 0) &&
-                                         (!throughWeek.HasValue || g.Week <= throughWeek.Value);
+                                        (!throughWeek.HasValue || g.Week <= throughWeek.Value);
 
                         if (isPlayed)
                         {
                             bool won = g.WinnerId == team.TeamID;
                             if (won) actualWins++; else actualLosses++;
-
                             var teamScore = won ? g.WPoints : g.LPoints;
                             var oppScore = won ? g.LPoints : g.WPoints;
 
@@ -1190,33 +1130,24 @@ namespace NCAA_Power_Ratings.Controllers
                         }
                         else
                         {
-                            // Get projection
-                            var teamName = team.TeamName;
-                            var oppTeamName = opp?.TeamName ?? "Unknown";
-                            var key = $"{teamName}|{oppTeamName}";
-                            var altKey = $"{oppTeamName}|{teamName}";
-
                             double projTeamScore = 0, projOppScore = 0;
                             string confidence = "Unknown";
                             bool projWin = false;
 
-                            if (predictionMap.TryGetValue(key, out var pred))
+                            if (allProjections.TryGetValue(g.Id, out var pred))
                             {
-                                projTeamScore = pred.PredictedTeamScore;
-                                projOppScore = pred.PredictedOpponentScore;
+                                bool teamIsWinner = g.WinnerId == team.TeamID;
+                                projTeamScore = teamIsWinner
+                                    ? pred.PredictedTeamScore
+                                    : pred.PredictedOpponentScore;
+                                projOppScore = teamIsWinner
+                                    ? pred.PredictedOpponentScore
+                                    : pred.PredictedTeamScore;
                                 confidence = pred.Confidence;
-                                projWin = projTeamScore >= projOppScore;
-                            }
-                            else if (predictionMap.TryGetValue(altKey, out var altPred))
-                            {
-                                projTeamScore = altPred.PredictedOpponentScore;
-                                projOppScore = altPred.PredictedTeamScore;
-                                confidence = altPred.Confidence;
                                 projWin = projTeamScore >= projOppScore;
                             }
                             else
                             {
-                                // No prediction — assume home team wins
                                 projWin = isHome;
                             }
 
@@ -1239,7 +1170,6 @@ namespace NCAA_Power_Ratings.Controllers
                         }
                     }).ToList();
 
-                    // Projected finish rank within conference — computed after all teams processed
                     return new
                     {
                         team.TeamName,
@@ -1261,7 +1191,6 @@ namespace NCAA_Power_Ratings.Controllers
                     };
                 }).ToList();
 
-                // ── Sort: by conference, then projected win pct desc ──────────────
                 var sorted = teamResults
                     .OrderBy(t => t.Conference switch
                     {
@@ -1288,6 +1217,7 @@ namespace NCAA_Power_Ratings.Controllers
                 return StatusCode(500, "An error occurred computing projected standings.");
             }
         }
+
 
 
         /// <summary>
@@ -1495,60 +1425,24 @@ namespace NCAA_Power_Ratings.Controllers
                              throughWeek.HasValue && g.Week > throughWeek.Value))
                 .ToList();
 
-            // ── Project unplayed conference games ─────────────────────────────────
-            var matchupRequests = unplayedConfGames
-                .Where(g => teams.ContainsKey(g.WinnerId) && teams.ContainsKey(g.LoserId))
-                .Select(g => new MatchupRequest
-                {
-                    TeamName = teams[g.WinnerId].TeamName,
-                    OpponentName = teams[g.LoserId].TeamName,
-                    Location = g.Location,
-                    Week = g.Week
-                })
-                .ToList();
-
-            var predictions = matchupRequests.Any()
-                ? await _predictionService.PredictMatchups(year, matchupRequests, token)
-                : new List<GamePrediction>();
-
-            // Key: "TeamName|OpponentName" → prediction
-            var predictionMap = predictions.ToDictionary(
-                p => $"{p.TeamName}|{p.OpponentName}",
-                p => p
-            );
+            // ── Get projections from cache ────────────────────────────────────────
+            var allProjections = await _projectionCache.GetAllProjections(year, token);
 
             // Resolve projected winner for each unplayed game
-            // Returns (WinnerId, LoserId) tuples
-            var projectedResults = new List<(int WinnerId, int LoserId)>();
+            var projectedResults = new List<(int WinnerId, int LoserId, int GameId)>();
 
             foreach (var g in unplayedConfGames)
             {
-                if (!teams.TryGetValue(g.WinnerId, out var wTeam)) continue;
-                if (!teams.TryGetValue(g.LoserId, out var lTeam)) continue;
-
-                var key = $"{wTeam.TeamName}|{lTeam.TeamName}";
-                var altKey = $"{lTeam.TeamName}|{wTeam.TeamName}";
-
-                if (predictionMap.TryGetValue(key, out var pred))
+                if (allProjections.TryGetValue(g.Id, out var pred))
                 {
-                    // WinnerId team is TeamName in prediction
-                    if (pred.PredictedTeamScore >= pred.PredictedOpponentScore)
-                        projectedResults.Add((g.WinnerId, g.LoserId));
-                    else
-                        projectedResults.Add((g.LoserId, g.WinnerId));
-                }
-                else if (predictionMap.TryGetValue(altKey, out var altPred))
-                {
-                    // WinnerId team is OpponentName in prediction
-                    if (altPred.PredictedOpponentScore >= altPred.PredictedTeamScore)
-                        projectedResults.Add((g.WinnerId, g.LoserId));
-                    else
-                        projectedResults.Add((g.LoserId, g.WinnerId));
+                    bool winnerWins = pred.PredictedTeamScore >= pred.PredictedOpponentScore;
+                    projectedResults.Add(winnerWins
+                        ? (g.WinnerId, g.LoserId, g.Id)
+                        : (g.LoserId, g.WinnerId, g.Id));
                 }
                 else
                 {
-                    // No prediction — default to listed winner (home field advantage baked in)
-                    projectedResults.Add((g.WinnerId, g.LoserId));
+                    projectedResults.Add((g.WinnerId, g.LoserId, g.Id));
                 }
             }
 
@@ -1562,13 +1456,11 @@ namespace NCAA_Power_Ratings.Controllers
 
                     var projWins = projectedResults.Count(r =>
                         r.WinnerId == t.TeamID &&
-                        unplayedConfGames.Any(g =>
-                            g.WinnerId == r.WinnerId && g.LoserId == r.LoserId));
+                        unplayedConfGames.Any(g => g.Id == r.GameId));
 
                     var projLosses = projectedResults.Count(r =>
                         r.LoserId == t.TeamID &&
-                        unplayedConfGames.Any(g =>
-                            g.WinnerId == r.WinnerId && g.LoserId == r.LoserId));
+                        unplayedConfGames.Any(g => g.Id == r.GameId));
 
                     records.TryGetValue(t.TeamID, out var rec);
 
@@ -1595,7 +1487,6 @@ namespace NCAA_Power_Ratings.Controllers
             // ── Head-to-head: actual results take precedence over projected ───────
             foreach (var standing in confRecords)
             {
-                // Actual H2H
                 var playedH2H = playedConfGames
                     .Where(g => g.WinnerId == standing.TeamId || g.LoserId == standing.TeamId)
                     .GroupBy(g => g.WinnerId == standing.TeamId ? g.LoserId : g.WinnerId)
@@ -1605,7 +1496,6 @@ namespace NCAA_Power_Ratings.Controllers
                              g.Count(game => game.LoserId == standing.TeamId)
                     );
 
-                // Projected H2H — only for opponents not yet played
                 var projH2H = projectedResults
                     .Where(r =>
                         (r.WinnerId == standing.TeamId || r.LoserId == standing.TeamId) &&
@@ -1648,7 +1538,6 @@ namespace NCAA_Power_Ratings.Controllers
                 .GroupBy(s => s.Conference)
                 .ToDictionary(g => g.Key, g => g.ToList());
         }
-
 
         // Helper — maps team to their division for Sun Belt
 

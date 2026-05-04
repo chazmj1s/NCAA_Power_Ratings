@@ -10,6 +10,7 @@ namespace NCAA_Power_Ratings.Mobile.Views
         private readonly TeamsPage         _teamsPage;
         private readonly RivalriesPage     _rivalriesPage;
         private readonly ConfigPage        _configPage;
+        private readonly ProjectionsPage   _projectionsPage;
 
         public MainPage(
             MainViewModel mainViewModel,
@@ -17,7 +18,8 @@ namespace NCAA_Power_Ratings.Mobile.Views
             PowerRankingsPage rankingsPage,
             TeamsPage teamsPage,
             RivalriesPage rivalriesPage,
-            ConfigPage configPage)
+            ConfigPage configPage,
+            ProjectionsPage projectionsPage)
         {
             InitializeComponent();
 
@@ -27,12 +29,13 @@ namespace NCAA_Power_Ratings.Mobile.Views
             _teamsPage     = teamsPage;
             _rivalriesPage = rivalriesPage;
             _configPage    = configPage;
+            _projectionsPage = projectionsPage;
 
             BindingContext = _vm;
 
             // Build tab items
             _vm.TabItems.Clear();
-            var labels = new[] { "Scores", "Rankings", "Teams", "Rivalries", "Config" };
+            var labels = new[] { "Scores", "Rankings", "Teams", "Rivalries", "Projections", "Config" };
             for (int i = 0; i < labels.Length; i++)
                 _vm.TabItems.Add(new TabItem { Label = labels[i], Index = i, IsSelected = i == 0 });
 
@@ -42,6 +45,7 @@ namespace NCAA_Power_Ratings.Mobile.Views
             PageHost.Add(new ContentView { Content = _rankingsPage.Content, BindingContext = _rankingsPage.BindingContext });
             PageHost.Add(new ContentView { Content = _teamsPage.Content, BindingContext = _teamsPage.BindingContext });
             PageHost.Add(new ContentView { Content = _rivalriesPage.Content, BindingContext = _rivalriesPage.BindingContext });
+            PageHost.Add(new ContentView { Content = _projectionsPage.Content, BindingContext = _projectionsPage.BindingContext });
             PageHost.Add(new ContentView { Content = _configPage.Content, BindingContext = _configPage.BindingContext });
 
 
@@ -90,6 +94,8 @@ namespace NCAA_Power_Ratings.Mobile.Views
                         await tvm.LoadDataAsync(); break;
                     case 3 when _rivalriesPage.BindingContext is RivalriesViewModel riv && !riv.HasLoaded:
                         await riv.LoadDataAsync(); break;
+                    case 4 when _projectionsPage.BindingContext is ProjectionsViewModel pvm && !pvm.HasLoaded:
+                        await pvm.LoadDataAsync(); break;
                 }
             });
         }

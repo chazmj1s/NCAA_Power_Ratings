@@ -74,6 +74,16 @@ namespace NCAA_Power_Ratings.Services
 
         // Flags for stubs — requirements we couldn't compute from available data
         public List<string> StubsApplied { get; set; } = new();
+
+        public List<ContenderInfo> Contenders { get; set; } = new();
+    }
+
+    public class ContenderInfo
+    {
+        public string TeamName { get; set; }
+        public int ConferenceWins { get; set; }
+        public int ConferenceLosses { get; set; }
+        public string ConferenceRecord => $"{ConferenceWins}-{ConferenceLosses}";
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -149,6 +159,7 @@ namespace NCAA_Power_Ratings.Services
             result.Qualifier2 = q2;
             result.Qualifier1Method = "Conference record";
             result.Qualifier2Method = "Conference record";
+            result.Contenders = GetContenders(standings, q1, q2);  // ← add this line
             return result;
         }
 
@@ -180,6 +191,7 @@ namespace NCAA_Power_Ratings.Services
             result.Qualifier2 = q2;
             result.Qualifier1Method = "Conference record";
             result.Qualifier2Method = "Conference record";
+            result.Contenders = GetContenders(standings, q1, q2);  // ← add this line
             return result;
         }
 
@@ -212,6 +224,7 @@ namespace NCAA_Power_Ratings.Services
             result.Qualifier2 = q2;
             result.Qualifier1Method = "Conference record";
             result.Qualifier2Method = "Conference record";
+            result.Contenders = GetContenders(standings, q1, q2);  // ← add this line
             return result;
         }
 
@@ -247,6 +260,7 @@ namespace NCAA_Power_Ratings.Services
             result.Qualifier2 = q2;
             result.Qualifier1Method = "Conference record";
             result.Qualifier2Method = "Conference record";
+            result.Contenders = GetContenders(standings, q1, q2);  // ← add this line
             return result;
         }
 
@@ -277,6 +291,7 @@ namespace NCAA_Power_Ratings.Services
             result.Qualifier2 = q2;
             result.Qualifier1Method = "Conference record";
             result.Qualifier2Method = "Conference record";
+            result.Contenders = GetContenders(standings, q1, q2);  // ← add this line
             return result;
         }
 
@@ -310,6 +325,7 @@ namespace NCAA_Power_Ratings.Services
             result.Qualifier2 = q2;
             result.Qualifier1Method = "Conference record";
             result.Qualifier2Method = "Conference record";
+            result.Contenders = GetContenders(standings, q1, q2);  // ← add this line
             return result;
         }
 
@@ -341,6 +357,7 @@ namespace NCAA_Power_Ratings.Services
             result.Qualifier2 = q2;
             result.Qualifier1Method = "Conference record";
             result.Qualifier2Method = "Conference record";
+            result.Contenders = GetContenders(standings, q1, q2);  // ← add this line
             return result;
         }
 
@@ -371,6 +388,7 @@ namespace NCAA_Power_Ratings.Services
             result.Qualifier2 = q2;
             result.Qualifier1Method = "Conference record";
             result.Qualifier2Method = "Conference record";
+            result.Contenders = GetContenders(standings, q1, q2);  // ← add this line
             return result;
         }
 
@@ -410,6 +428,7 @@ namespace NCAA_Power_Ratings.Services
             result.Qualifier2 = q2;
             result.Qualifier1Method = "East Division winner";
             result.Qualifier2Method = "West Division winner";
+            result.Contenders = GetContenders(standings, q1, q2);  // ← add this line
             return result;
         }
 
@@ -437,6 +456,7 @@ namespace NCAA_Power_Ratings.Services
             result.Qualifier2 = q2;
             result.Qualifier1Method = "Conference record";
             result.Qualifier2Method = "Conference record";
+            result.Contenders = GetContenders(standings, q1, q2);  // ← add this line
             return result;
         }
 
@@ -643,5 +663,36 @@ namespace NCAA_Power_Ratings.Services
             log.Add($"  Spot {spot} TB5 (External ranking): STUB — rankings unavailable");
             return null;
         }
+
+        private static List<ContenderInfo> GetContenders(
+            List<ConferenceStanding> allStandings,
+            ConferenceStanding qualifier1,
+            ConferenceStanding qualifier2)
+            {
+                if (allStandings.Count == 0) return new();
+
+                // A team is a contender if:
+                // - Not already a qualifier
+                // - Within 1 game of the #2 qualifier's win pct
+                // - Has at least 1 conference game played
+                var q2WinPct = qualifier2?.ConferenceWinPct ?? 0.0;
+                var cutoff = q2WinPct - (1.0 / Math.Max(1,
+                    (qualifier2?.ConferenceWins ?? 0) + (qualifier2?.ConferenceLosses ?? 0)));
+
+                return allStandings
+                    .Where(t => t != qualifier1 &&
+                                t != qualifier2 &&
+                                t.ConferenceWinPct >= cutoff &&
+                                (t.ConferenceWins + t.ConferenceLosses) > 0)
+                    .OrderByDescending(t => t.ConferenceWinPct)
+                    .ThenByDescending(t => t.ConferenceWins)
+                    .Select(t => new ContenderInfo
+                    {
+                        TeamName = t.TeamName,
+                        ConferenceWins = t.ConferenceWins,
+                        ConferenceLosses = t.ConferenceLosses
+                    })
+                    .ToList();
+            }
     }
 }

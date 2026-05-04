@@ -1,5 +1,7 @@
-using System.Net.Http.Json;
 using Microsoft.Maui.Devices;
+using NCAA_Power_Ratings.Mobile.Models;
+using System.Net.Http.Json;
+using System.Text.Json;
 
 namespace NCAA_Power_Ratings.Mobile.Services
 {
@@ -225,5 +227,124 @@ namespace NCAA_Power_Ratings.Mobile.Services
 
             return teams;
         }
+
+        /// <summary>
+        /// Gets projected conference standings for all FBS teams.
+        /// throughWeek simulates mid-season — games after this week are projected.
+        /// </summary>
+        public async Task<List<ProjectedTeamStanding>> GetProjectedStandingsAsync(
+            int year,
+            int? throughWeek = null)
+        {
+            try
+            {
+                var url = $"{_baseUrl}/projected-standings?year={year}";
+                if (throughWeek.HasValue)
+                    url += $"&throughWeek={throughWeek}";
+
+                var response = await _httpClient.GetAsync(url);
+                if (!response.IsSuccessStatusCode) return null;
+
+                var json = await response.Content.ReadAsStringAsync();
+                var options = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
+                var raw = JsonSerializer.Deserialize<List<JsonElement>>(json, options);
+
+                return raw?.Select(r => new ProjectedTeamStanding
+                {
+                    TeamName = r.GetProperty("teamName").GetString(),
+                    Conference = r.GetProperty("conference").GetString(),
+                    Division = r.TryGetProperty("division", out var div) && div.ValueKind != JsonValueKind.Null
+                                            ? div.GetString() : null,
+                    ActualWins = r.GetProperty("actualWins").GetInt32(),
+                    ActualLosses = r.GetProperty("actualLosses").GetInt32(),
+                    ProjectedWins = r.GetProperty("projectedWins").GetInt32(),
+                    ProjectedLosses = r.GetProperty("projectedLosses").GetInt32(),
+                    ProjectedWinPct = r.GetProperty("projectedWinPct").GetDouble(),
+                    Games = r.GetProperty("games").EnumerateArray().Select(g => new ProjectedGame
+                    {
+                        Week = g.GetProperty("week").GetInt32(),
+                        Opponent = g.GetProperty("opponent").GetString(),
+                        Location = g.GetProperty("location").GetString(),
+                        Result = g.GetProperty("result").GetString(),
+                        Score = g.TryGetProperty("score", out var sc) && sc.ValueKind != JsonValueKind.Null ? sc.GetString() : null,
+                        ProjScore = g.TryGetProperty("projScore", out var ps) && ps.ValueKind != JsonValueKind.Null ? ps.GetString() : null,
+                        Confidence = g.TryGetProperty("confidence", out var cf) && cf.ValueKind != JsonValueKind.Null ? cf.GetString() : null,
+                        Type = g.GetProperty("type").GetString(),
+                        NeutralSite = g.GetProperty("neutralSite").GetBoolean()
+                    }).ToList()
+                }).ToList();
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"[API] Error getting projected standings: {ex.Message}");
+                return null;
+            }
+        }
+
+        /// <summary>
+        /// Gets projected conference championship qualifiers for all FBS conferences.
+        /// throughWeek simulates mid-season — games after this week are projected.
+        /// </summary>
+        public async Task<List<ChampionshipMatchup>> GetProjectedChampionshipQualifiersAsync(
+            int year,
+            int? throughWeek = null)
+        {
+            try
+            {
+                var url = $"{_baseUrl}/projected-championship-qualifiers?year={year}";
+                if (throughWeek.HasValue)
+                    url += $"&throughWeek={throughWeek}";
+
+                var response = await _httpClient.GetAsync(url);
+                if (!response.IsSuccessStatusCode) return null;
+
+                var json = await response.Content.ReadAsStringAsync();
+                var options = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
+                var raw = JsonSerializer.Deserialize<List<JsonElement>>(json, options);
+
+                return raw?.Select(r => new ChampionshipMatchup
+                {
+                    Conference = r.GetProperty("conference").GetString(),
+                    Format = r.GetProperty("format").GetString(),
+                    Qualifier1Method = r.GetProperty("qualifier1Method").GetString(),
+                    Qualifier2Method = r.GetProperty("qualifier2Method").GetString(),
+                    SimulatedThrough = r.TryGetProperty("simulatedThrough", out var st)
+                                            ? st.GetString() : null,
+                    TiebreakerLog = r.GetProperty("tiebreakerLog")
+                                          .EnumerateArray()
+                                          .Select(l => l.GetString())
+                                          .ToList(),
+                    StubsApplied = r.GetProperty("stubsApplied")
+                                          .EnumerateArray()
+                                          .Select(l => l.GetString())
+                                          .ToList(),
+                    Qualifier1 = ParseQualifier(r.GetProperty("qualifier1")),
+                    Qualifier2 = ParseQualifier(r.GetProperty("qualifier2")),
+                    Contenders = r.GetProperty("contenders").EnumerateArray()
+                      .Select(c => new ChampionshipContender
+                      {
+                          TeamName = c.GetProperty("teamName").GetString(),
+                          ConferenceWins = c.GetProperty("conferenceWins").GetInt32(),
+                          ConferenceLosses = c.GetProperty("conferenceLosses").GetInt32()
+                      }).ToList()
+                }).ToList();
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"[API] Error getting championship qualifiers: {ex.Message}");
+                return null;
+            }
+        }
+
+        private static ChampionshipQualifier ParseQualifier(JsonElement q) => new()
+        {
+            TeamName = q.GetProperty("teamName").GetString(),
+            ConferenceWins = q.GetProperty("conferenceWins").GetInt32(),
+            ConferenceLosses = q.GetProperty("conferenceLosses").GetInt32(),
+            OverallWins = q.GetProperty("overallWins").GetInt32(),
+            OverallLosses = q.GetProperty("overallLosses").GetInt32(),
+            Division = q.TryGetProperty("division", out var d) && d.ValueKind != JsonValueKind.Null
+                                   ? d.GetString() : null
+        };
     }
 }
