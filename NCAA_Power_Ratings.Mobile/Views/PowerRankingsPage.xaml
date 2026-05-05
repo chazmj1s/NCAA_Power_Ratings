@@ -58,7 +58,7 @@
             <Grid Padding="4,3" ColumnDefinitions="44,22,*,55,70,60">
 
               <!-- Rank badge -->
-              <Border Grid.Column="0"
+              <!--<Border Grid.Column="0"
                       BackgroundColor="{Binding IsTop25, Converter={StaticResource BoolToColorConverter}}"
                       StrokeThickness="0" Padding="2,2"
                       HeightRequest="26" WidthRequest="40"
@@ -66,12 +66,31 @@
                 <Border.StrokeShape>
                   <RoundRectangle CornerRadius="3"/>
                 </Border.StrokeShape>
-                <Label Text="{Binding DisplayRank}"
+                <Label Text="{Binding OverallRank}"
                        FontSize="11" FontAttributes="Bold" TextColor="White"
                        HorizontalOptions="Center" VerticalOptions="Center"/>
-              </Border>
+              </Border>-->
+              <Grid Grid.Column="0"
+                    Padding="2,2"
+                    HeightRequest="26"
+                    WidthRequest="40"
+                    HorizontalOptions="Center"
+                    VerticalOptions="Center">
 
-              <!-- Star -->
+                    <!-- Background box -->
+                    <BoxView CornerRadius="3"
+                    Color="{Binding IsTop25, Converter={StaticResource BoolToColorConverter}}" />
+
+                    <!-- Rank text -->
+                    <Label Text="{Binding OverallRank}"
+                    FontSize="11"
+                    FontAttributes="Bold"
+                    TextColor="White"
+                    HorizontalOptions="Center"
+                    VerticalOptions="Center" />
+              </Grid>
+
+                            <!-- Star -->
               <Label Grid.Column="1" Text="☆" FontSize="16"
                      HorizontalOptions="Center" VerticalOptions="Center">
                 <Label.GestureRecognizers>

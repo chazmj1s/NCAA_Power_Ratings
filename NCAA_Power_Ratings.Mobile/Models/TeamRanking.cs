@@ -18,9 +18,6 @@ namespace NCAA_Power_Ratings.Mobile.Models
         public string? Tier { get; set; }           // "P4", "G5", "Independent", "Other"
         public int OverallRank { get; set; }        // Rank among ALL teams (1-133)
         public int TierRank { get; set; }           // Rank within tier (e.g., #1 G5)
-
-        // Keep Rank for backward compatibility (maps to OverallRank)
-        public int Rank { get; set; }
         public decimal? Ranking { get; set; }
         public int Year { get; set; }
         public byte Wins { get; set; }
@@ -31,8 +28,7 @@ namespace NCAA_Power_Ratings.Mobile.Models
         public string Record => $"{Wins}-{Losses}";
 
         // Display helpers
-        public string DisplayRank => $"#{Rank}";
-        public string DisplayOverallRank => $"#{OverallRank}";
+        public string DisplayRank => $"#{OverallRank}";
         public string DisplayTierRank => $"#{TierRank}";
         public string DisplayTier => Tier ?? "N/A";
         public string DisplayTierWithRank => Tier switch
@@ -49,7 +45,14 @@ namespace NCAA_Power_Ratings.Mobile.Models
         // Set by ViewModel after each sort change to drive the dynamic column
         public string ActiveSortValue { get; set; } = string.Empty;
 
-        public bool IsTop25 => Rank <= 25;
+        public bool IsTop25
+        {
+            get
+            {
+                System.Diagnostics.Debug.WriteLine($"IsTop25 evaluated for {TeamName} (Rank={OverallRank})");
+                return OverallRank <= 25;
+            }
+        }
         public bool IsOddRow { get; set; }
 
         private bool _isFollowed;

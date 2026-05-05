@@ -60,14 +60,8 @@ namespace NCAA_Power_Ratings.Mobile.Services
 
                 if (rankings != null && rankings.Count > 0)
                 {
-                    // Map OverallRank to Rank for backward compatibility
-                    foreach (var ranking in rankings)
-                    {
-                        ranking.Rank = ranking.OverallRank;
-                    }
-
-                    System.Diagnostics.Debug.WriteLine($"[API] First team: {rankings[0].TeamName} - Rank: {rankings[0].Rank} ({rankings[0].Tier} #{rankings[0].TierRank}) - Power: {rankings[0].Ranking}");
-                    System.Diagnostics.Debug.WriteLine($"[API] Last team: {rankings[^1].TeamName} - Rank: {rankings[^1].Rank} ({rankings[^1].Tier} #{rankings[^1].TierRank}) - Power: {rankings[^1].Ranking}");
+                    System.Diagnostics.Debug.WriteLine($"[API] First team: {rankings[0].TeamName} - Rank: {rankings[0].OverallRank} ({rankings[0].Tier} #{rankings[0].TierRank}) - Power: {rankings[0].Ranking}");
+                    System.Diagnostics.Debug.WriteLine($"[API] Last team: {rankings[^1].TeamName} - Rank: {rankings[^1].OverallRank} ({rankings[^1].Tier} #{rankings[^1].TierRank}) - Power: {rankings[^1].Ranking}");
                 }
                 else
                 {
@@ -215,7 +209,7 @@ namespace NCAA_Power_Ratings.Mobile.Services
                     Conference = conferences[i % conferences.Length],
                     ConferenceAbbr = conferences[i % conferences.Length],
                     Division = "FBS",
-                    Rank = i,
+                    OverallRank = i,
                     Ranking = (decimal)(100 - (i * 0.5) + random.NextDouble() * 5),
                     Year = year,
                     Wins = (byte)random.Next(0, 13),

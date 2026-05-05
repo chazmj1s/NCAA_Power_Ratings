@@ -147,6 +147,7 @@ namespace NCAA_Power_Ratings.Mobile.ViewModels
             }
             catch (Exception ex)
             {
+                System.Diagnostics.Debug.WriteLine(ex.Message?.ToString());
                 StatusMessage = $"Error: {ex.Message}";
             }
             finally
@@ -252,8 +253,8 @@ namespace NCAA_Power_Ratings.Mobile.ViewModels
             IOrderedEnumerable<TeamRanking> sorted = _currentSort switch
             {
                 RankingSort.Rank => _isSortAscending
-                    ? filtered.OrderBy(t => t.Rank)
-                    : filtered.OrderByDescending(t => t.Rank),
+                    ? filtered.OrderBy(t => t.OverallRank)
+                    : filtered.OrderByDescending(t => t.OverallRank),
                 RankingSort.TeamName => _isSortAscending
                     ? filtered.OrderBy(t => t.TeamName)
                     : filtered.OrderByDescending(t => t.TeamName),
@@ -264,8 +265,8 @@ namespace NCAA_Power_Ratings.Mobile.ViewModels
                     ? filtered.OrderBy(t => t.Wins).ThenBy(t => t.Losses)
                     : filtered.OrderByDescending(t => t.Wins).ThenBy(t => t.Losses),
                 RankingSort.Conference => _isSortAscending
-                    ? filtered.OrderBy(t => t.Conference).ThenBy(t => t.Rank)
-                    : filtered.OrderByDescending(t => t.Conference).ThenBy(t => t.Rank),
+                    ? filtered.OrderBy(t => t.Conference).ThenBy(t => t.OverallRank)
+                    : filtered.OrderByDescending(t => t.Conference).ThenBy(t => t.OverallRank),
                 RankingSort.SOS => _isSortAscending
                     ? filtered.OrderBy(t => t.CombinedSOS ?? 0)
                     : filtered.OrderByDescending(t => t.CombinedSOS ?? 0),
@@ -275,7 +276,7 @@ namespace NCAA_Power_Ratings.Mobile.ViewModels
                 RankingSort.Tier => _isSortAscending
                     ? filtered.OrderBy(t => t.Tier).ThenBy(t => t.TierRank)
                     : filtered.OrderByDescending(t => t.Tier).ThenBy(t => t.TierRank),
-                _ => filtered.OrderBy(t => t.Rank)
+                _ => filtered.OrderBy(t => t.OverallRank)
             };
 
             var result = sorted.ToList();

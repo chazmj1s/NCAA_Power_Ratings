@@ -11,6 +11,9 @@ namespace NCAA_Power_Ratings.Mobile.Converters
     {
         public object? Convert(object? value, Type targetType, object? parameter, CultureInfo culture)
         {
+            System.Diagnostics.Debug.WriteLine($"Convert evaluated for {targetType} Value: {value}, and parameter: {parameter}");
+
+
             if (value is bool isTop25 && isTop25)
             {
                 // Gold color for Top 25
