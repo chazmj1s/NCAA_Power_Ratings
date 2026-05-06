@@ -9,8 +9,7 @@ namespace NCAA_Power_Ratings.Mobile.Views
         private readonly MainViewModel               _vm;
         private readonly SchedulePage                _schedulePage;
         private readonly PowerRankingsPage           _rankingsPage;
-        private readonly TeamsPage                   _teamsPage;
-        private readonly RivalriesPage               _rivalriesPage;
+        private readonly FollowingPage               _followingPage;
         private readonly ProjectionsPage             _projectionsPage;
         private readonly ConfigPage                  _configPage;
         private readonly SharedNavigationStateService _navState;
@@ -20,8 +19,7 @@ namespace NCAA_Power_Ratings.Mobile.Views
             MainViewModel mainViewModel,
             SchedulePage schedulePage,
             PowerRankingsPage rankingsPage,
-            TeamsPage teamsPage,
-            RivalriesPage rivalriesPage,
+            FollowingPage followingPage,
             ProjectionsPage projectionsPage,
             ConfigPage configPage)
         {
@@ -31,8 +29,7 @@ namespace NCAA_Power_Ratings.Mobile.Views
             _vm              = mainViewModel;
             _schedulePage    = schedulePage;
             _rankingsPage    = rankingsPage;
-            _teamsPage       = teamsPage;
-            _rivalriesPage   = rivalriesPage;
+            _followingPage   = followingPage;
             _projectionsPage = projectionsPage;
             _configPage      = configPage;
 
@@ -40,15 +37,14 @@ namespace NCAA_Power_Ratings.Mobile.Views
 
             // Build tab items
             _vm.TabItems.Clear();
-            var labels = new[] { "Scores", "Rankings", "Teams", "Rivalries", "Projections", "Config" };
+            var labels = new[] { "Scores", "Rankings", "Following", "Projections", "Config" };
             for (int i = 0; i < labels.Length; i++)
                 _vm.TabItems.Add(new TabItem { Label = labels[i], Index = i, IsSelected = i == 0 });
 
             // Add pages to AbsoluteLayout — each fills the entire host
             AddPageToHost(_schedulePage);
             AddPageToHost(_rankingsPage);
-            AddPageToHost(_teamsPage);
-            AddPageToHost(_rivalriesPage);
+            AddPageToHost(_followingPage);
             AddPageToHost(_projectionsPage);
             AddPageToHost(_configPage);
 
@@ -115,11 +111,9 @@ namespace NCAA_Power_Ratings.Mobile.Views
                         await svm.LoadDataAsync(); break;
                     case 1 when _rankingsPage.BindingContext is PowerRankingsViewModel rvm && !rvm.HasLoaded:
                         await rvm.LoadDataAsync(); break;
-                    case 2 when _teamsPage.BindingContext is TeamsViewModel tvm && !tvm.HasLoaded:
-                        await tvm.LoadDataAsync(); break;
-                    case 3 when _rivalriesPage.BindingContext is RivalriesViewModel riv && !riv.HasLoaded:
-                        await riv.LoadDataAsync(); break;
-                    case 4 when _projectionsPage.BindingContext is ProjectionsViewModel pvm && !pvm.HasLoaded:
+                    case 2 when _followingPage.BindingContext is FollowingViewModel fvm && !fvm.HasLoaded:
+                        await fvm.LoadDataAsync(); break;
+                    case 3 when _projectionsPage.BindingContext is ProjectionsViewModel pvm && !pvm.HasLoaded:
                         await pvm.LoadDataAsync(); break;
                 }
             });
