@@ -38,7 +38,7 @@ namespace NCAA_Power_Ratings.Utilities
             logger.LogInformation("Found {Count} rivalries to process", rivalryMetadata.Count);
 
             // Get all games
-            var allGames = await context.Games
+            var allGames = await context.Game
                 .Select(g => new GameData
                 {
                     Team1 = g.WinnerId < g.LoserId ? g.WinnerId : g.LoserId,
@@ -51,7 +51,7 @@ namespace NCAA_Power_Ratings.Utilities
                 .ToListAsync(cancellationToken);
 
             // Get team name to ID mapping (include alias for matching)
-            var teamMapping = await context.Teams
+            var teamMapping = await context.Team
                 .Select(t => new { t.TeamID, t.TeamName, t.Alias })
                 .ToListAsync(cancellationToken);
 

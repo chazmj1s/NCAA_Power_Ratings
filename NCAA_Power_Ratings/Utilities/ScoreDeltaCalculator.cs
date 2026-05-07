@@ -11,7 +11,7 @@ namespace NCAA_Power_Ratings.Utilities
             await using var context = await _contextFactory.CreateDbContextAsync(token);
 
             // Join Games with TeamRecords for winner and loser, calculate win percentages
-            var cteData = await context.Games
+            var cteData = await context.Game
                 .Where(g => g.Year > 0)
                 .Join(
                     context.TeamRecords,

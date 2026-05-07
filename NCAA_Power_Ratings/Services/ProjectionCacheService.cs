@@ -74,10 +74,10 @@ namespace NCAA_Power_Ratings.Services
 
                 await using var context = await _contextFactory.CreateDbContextAsync(token);
 
-                var teams = await context.Teams.ToDictionaryAsync(t => t.TeamID, token);
+                var teams = await context.Team.ToDictionaryAsync(t => t.TeamID, token);
 
                 // Load all regular season games
-                var allGames = await context.Games
+                var allGames = await context.Game
                     .Where(g => g.Year == year && g.Week < 16)
                     .ToListAsync(token);
 

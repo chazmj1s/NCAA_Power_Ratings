@@ -257,10 +257,10 @@ namespace NCAA_Power_Ratings.Services
 
                 // Step 2: GameParticipants - Union of games from winner and loser perspectives
                 // Include team divisions for cross-divisional penalty
-                var gamesFromWinner = from g in context.Games
+                var gamesFromWinner = from g in context.Game
                     where g.Year == targetYear
-                    join t in context.Teams on g.WinnerId equals t.TeamID
-                    join opp in context.Teams on g.LoserId equals opp.TeamID
+                    join t in context.Team on g.WinnerId equals t.TeamID
+                    join opp in context.Team on g.LoserId equals opp.TeamID
                     select new
                     {
                         g.Year,
@@ -276,10 +276,10 @@ namespace NCAA_Power_Ratings.Services
                         IsHomeTeam = g.Location == 'W'
                     };
 
-                var gamesFromLoser = from g in context.Games
+                var gamesFromLoser = from g in context.Game
                     where g.Year == targetYear
-                    join t in context.Teams on g.LoserId equals t.TeamID
-                    join opp in context.Teams on g.WinnerId equals opp.TeamID
+                    join t in context.Team on g.LoserId equals t.TeamID
+                    join opp in context.Team on g.WinnerId equals opp.TeamID
                     select new
                     {
                         g.Year,
@@ -552,10 +552,10 @@ namespace NCAA_Power_Ratings.Services
             var targetYear = year ?? DateTime.Now.Year;
 
             // Step 1: Get all games for the year with team divisions
-            var gamesFromWinner = from g in context.Games
+            var gamesFromWinner = from g in context.Game
                 where g.Year == targetYear
-                join t in context.Teams on g.WinnerId equals t.TeamID
-                join opp in context.Teams on g.LoserId equals opp.TeamID
+                join t in context.Team on g.WinnerId equals t.TeamID
+                join opp in context.Team on g.LoserId equals opp.TeamID
                 select new {
                     g.Year,
                     TeamId = g.WinnerId,
@@ -569,10 +569,10 @@ namespace NCAA_Power_Ratings.Services
                     IsHomeTeam = g.Location == 'W'
                 };
 
-            var gamesFromLoser = from g in context.Games
+            var gamesFromLoser = from g in context.Game
                 where g.Year == targetYear
-                join t in context.Teams on g.LoserId equals t.TeamID
-                join opp in context.Teams on g.WinnerId equals opp.TeamID
+                join t in context.Team on g.LoserId equals t.TeamID
+                join opp in context.Team on g.WinnerId equals opp.TeamID
                 select new {
                     g.Year,
                     TeamId = g.LoserId,

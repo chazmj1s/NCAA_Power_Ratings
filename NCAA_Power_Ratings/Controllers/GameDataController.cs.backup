@@ -1087,7 +1087,7 @@ namespace NCAA_Power_Ratings.Controllers
                 var targetYear = year ?? DateTime.Now.Year;
 
                 // Get team's games
-                var gamesFromWinner = context.Games
+                var gamesFromWinner = context.Game
                     .Where(g => g.Year == targetYear && g.WinnerId == teamId)
                     .Select(g => new {
                         g.Week,
@@ -1104,7 +1104,7 @@ namespace NCAA_Power_Ratings.Controllers
                         LocationDisplay = g.Location == 'W' ? "Home" : g.Location == 'L' ? "Away" : "Neutral"
                     });
 
-                var gamesFromLoser = context.Games
+                var gamesFromLoser = context.Game
                     .Where(g => g.Year == targetYear && g.LoserId == teamId)
                     .Select(g => new {
                         g.Week,
@@ -1305,7 +1305,7 @@ namespace NCAA_Power_Ratings.Controllers
 
                 // Get team names lookup in batch
                 var teamIds = matchups.SelectMany(m => new[] { m.Team1Id, m.Team2Id }).Distinct().ToList();
-                var teamNames = await context.Teams
+                var teamNames = await context.Team
                     .Where(t => teamIds.Contains(t.TeamID))
                     .ToDictionaryAsync(t => t.TeamID, t => t.TeamName);
 
@@ -1382,7 +1382,7 @@ namespace NCAA_Power_Ratings.Controllers
                 var targetYear = year ?? 2024;
 
                 // Get raw game data with team records
-                var gameData = await context.Games
+                var gameData = await context.Game
                     .Where(g => g.Year == targetYear)
                     .Join(
                         context.TeamRecords,

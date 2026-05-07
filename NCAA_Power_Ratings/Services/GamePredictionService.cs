@@ -35,7 +35,7 @@ namespace NCAA_Power_Ratings.Services
 
             var cutoffYear = DateTime.Now.Year - RecentYearsForAverage;
 
-            var games = await context.Games
+            var games = await context.Game
                 .Where(g => g.Year >= cutoffYear)
                 .ToListAsync(token);
 
@@ -65,7 +65,7 @@ namespace NCAA_Power_Ratings.Services
             using var context = await _contextFactory.CreateDbContextAsync(token);
 
             // Load necessary data
-            var teams = await context.Teams.ToListAsync(token);
+            var teams = await context.Team.ToListAsync(token);
             var team = teams.FirstOrDefault(t => t.TeamName == teamName);
             var opponent = teams.FirstOrDefault(t => t.TeamName == opponentName);
 
@@ -106,7 +106,7 @@ namespace NCAA_Power_Ratings.Services
             using var context = await _contextFactory.CreateDbContextAsync(token);
 
             // Load all necessary data once
-            var teams = await context.Teams.ToDictionaryAsync(t => t.TeamName, token);
+            var teams = await context.Team.ToDictionaryAsync(t => t.TeamName, token);
             var teamRecords = await context.TeamRecords
                 .Where(tr => tr.Year == year)
                 .ToDictionaryAsync(tr => tr.TeamID, token);

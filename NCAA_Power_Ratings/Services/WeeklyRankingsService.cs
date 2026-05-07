@@ -37,7 +37,7 @@ namespace NCAA_Power_Ratings.Services
 
             // ── 1. Load reference data ────────────────────────────────────────────
 
-            var allTeams = await context.Teams.ToListAsync(token);
+            var allTeams = await context.Team.ToListAsync(token);
             var fbsTeams = allTeams.Where(t => t.Division == "FBS").ToList();
             var fbsIds   = fbsTeams.Select(t => t.TeamID).ToHashSet();
 
@@ -46,7 +46,7 @@ namespace NCAA_Power_Ratings.Services
 
             // ── 2. Load only played games through this week ───────────────────────
 
-            var games = await context.Games
+            var games = await context.Game
                 .Where(g => g.Year == year &&
                             g.Week <= week &&
                             (g.WPoints > 0 || g.LPoints > 0))
@@ -350,7 +350,7 @@ namespace NCAA_Power_Ratings.Services
         {
             await using var context = await _contextFactory.CreateDbContextAsync(token);
 
-            var playedWeeks = await context.Games
+            var playedWeeks = await context.Game
                 .Where(g => g.Year == year && (g.WPoints > 0 || g.LPoints > 0))
                 .Select(g => g.Week)
                 .Distinct()

@@ -5,8 +5,8 @@ namespace NCAA_Power_Ratings.Data
 {
     public class NCAAContext(DbContextOptions<NCAAContext> options) : DbContext(options)
     {
-        public DbSet<Game> Games { get; set; }
-        public DbSet<Team> Teams { get; set; }
+        public DbSet<Game> Game { get; set; }
+        public DbSet<Team> Team { get; set; }
         public DbSet<AvgScoreDelta> AvgScoreDeltas { get; set; }
         public DbSet<TeamRecord> TeamRecords { get; set; }
         public DbSet<MatchupHistory> MatchupHistories { get; set; }

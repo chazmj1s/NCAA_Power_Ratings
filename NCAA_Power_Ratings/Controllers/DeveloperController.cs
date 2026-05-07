@@ -23,9 +23,11 @@ namespace NCAA_Power_Ratings.Controllers
         ScoreDeltaCalculator scoreDeltaCalculator,
         MatchupHistoryCalculator matchupHistoryCalculator,
         IOptions<MetricsConfiguration> config,
+        WeeklyRankingsService weeklyRankingsService,
         ILogger<DeveloperController> logger) : ControllerBase
     {
         private readonly MetricsConfiguration _config = config.Value;
+        private readonly WeeklyRankingsService _weeklyRankingsService = weeklyRankingsService;
 
         #region Data Loading Endpoints
 
@@ -554,7 +556,7 @@ namespace NCAA_Power_Ratings.Controllers
 
                 var targetYear = year ?? DateTime.Now.Year;
 
-                var gamesFromWinner = context.Games
+                var gamesFromWinner = context.Game
                     .Where(g => g.Year == targetYear && g.WinnerId == teamId)
                     .Select(g => new
                     {
@@ -572,7 +574,7 @@ namespace NCAA_Power_Ratings.Controllers
                         LocationDisplay = g.Location == 'W' ? "Home" : g.Location == 'L' ? "Away" : "Neutral"
                     });
 
-                var gamesFromLoser = context.Games
+                var gamesFromLoser = context.Game
                     .Where(g => g.Year == targetYear && g.LoserId == teamId)
                     .Select(g => new
                     {
@@ -769,7 +771,7 @@ namespace NCAA_Power_Ratings.Controllers
 
                 var targetYear = year ?? DateTime.Now.Year;
 
-                var games = await context.Games
+                var games = await context.Game
                     .Where(g => g.Year == targetYear)
                     .ToListAsync();
 
@@ -823,6 +825,64 @@ namespace NCAA_Power_Ratings.Controllers
             {
                 logger.LogError(ex, "Error running diagnostic");
                 return StatusCode(500, "An error occurred during diagnostic.");
+            }
+        }
+
+        /// <summary>
+        /// Backfills WeeklyRankings for every year/week combination in the database.
+        /// Loops through all distinct Year+Week pairs that have played games.
+        /// Example: POST /api/developer/backfillWeeklyRankings
+        /// Example: POST /api/developer/backfillWeeklyRankings?startYear=2010
+        /// </summary>
+        [HttpPost("backfillWeeklyRankings")]
+        public async Task<IActionResult> BackfillWeeklyRankings(
+            [FromQuery] int? startYear,
+            CancellationToken token = default)
+        {
+            try
+            {
+                await using var context = await contextFactory.CreateDbContextAsync(token);
+
+                var yearWeeksQuery = context.Game
+                    .Where(g => g.WPoints > 0 || g.LPoints > 0);
+
+                if (startYear.HasValue)
+                    yearWeeksQuery = yearWeeksQuery.Where(g => g.Year >= startYear.Value);
+
+                var yearWeeks = await yearWeeksQuery
+                    .Select(g => new { g.Year, g.Week })
+                    .Distinct()
+                    .OrderBy(g => g.Year)
+                    .ThenBy(g => g.Week)
+                    .ToListAsync(token);
+
+                if (!yearWeeks.Any())
+                    return NotFound("No played games found matching the criteria.");
+
+                logger.LogInformation(
+                    "Backfilling WeeklyRankings for {Count} year/week combinations...",
+                    yearWeeks.Count);
+
+                int processed = 0;
+                foreach (var yw in yearWeeks)
+                {
+                    await _weeklyRankingsService.ComputeAndSaveAsync(yw.Year, yw.Week, token);
+                    processed++;
+                    logger.LogInformation("Completed {Year} week {Week} ({Done}/{Total})",
+                        yw.Year, yw.Week, processed, yearWeeks.Count);
+                }
+
+                return Ok(new
+                {
+                    message   = $"Backfill complete.",
+                    processed = processed,
+                    startYear = startYear
+                });
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "Error during WeeklyRankings backfill");
+                return StatusCode(500, "An error occurred during backfill.");
             }
         }
 

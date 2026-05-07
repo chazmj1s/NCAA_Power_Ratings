@@ -48,10 +48,10 @@ effectiveStDev *= 2.0;  // Reduces negative Z-score by 50%
 
 ### Step 1: Include Team Divisions in Query
 ```csharp
-var gamesFromWinner = from g in context.Games
+var gamesFromWinner = from g in context.Game
     where g.Year == targetYear
-    join t in context.Teams on g.WinnerId equals t.TeamID
-    join opp in context.Teams on g.LoserId equals opp.TeamID
+    join t in context.Team on g.WinnerId equals t.TeamID
+    join opp in context.Team on g.LoserId equals opp.TeamID
     select new {
         TeamDivision = t.Division,
         OpponentDivision = opp.Division,

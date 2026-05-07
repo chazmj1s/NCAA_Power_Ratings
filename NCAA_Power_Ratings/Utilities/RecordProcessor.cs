@@ -17,12 +17,12 @@ namespace NCAA_Power_Ratings.Utilities
                 await using var context = _contextFactory.CreateDbContext();
 
                 // Load teams into memory to perform string.Split in C# instead of SQL
-                var teams = await context.Teams.ToListAsync(token);
+                var teams = await context.Team.ToListAsync(token);
 
                 // Use extension method to convert string array to Game
                 var gameData = cells.ToGame(yearIn, teams);
 
-                await context.Games.AddAsync(gameData, token);
+                await context.Game.AddAsync(gameData, token);
                 await context.SaveChangesAsync(token);
             }
         }

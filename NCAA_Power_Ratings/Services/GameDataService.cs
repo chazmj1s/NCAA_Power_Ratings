@@ -51,7 +51,7 @@ namespace NCAA_Power_Ratings.Services
             {
                 try
                 {
-                    await context.Games.AddRangeAsync(gameDataList);
+                    await context.Game.AddRangeAsync(gameDataList);
                     await context.SaveChangesAsync();
                 }
                 catch (Exception ex)
@@ -101,8 +101,8 @@ namespace NCAA_Power_Ratings.Services
                     var winnerName = Regex.Replace(cells[4].InnerText, regex, "").Trim();
                     var loserName = Regex.Replace(cells[7].InnerText, regex, "").Trim();
 
-                    int winnerId = context.Teams.FirstOrDefault(t => t.TeamName == winnerName)?.TeamID ?? -1;
-                    int loserId = context.Teams.FirstOrDefault(t => t.TeamName == loserName)?.TeamID ?? -1;
+                    int winnerId = context.Team.FirstOrDefault(t => t.TeamName == winnerName)?.TeamID ?? -1;
+                    int loserId = context.Team.FirstOrDefault(t => t.TeamName == loserName)?.TeamID ?? -1;
 
                     var siteCellText = cells[6].InnerText.Trim();
                     char siteIndicator = siteCellText.Contains('@') ? 'L' : siteCellText.Contains('N') ? 'N' : 'W';
@@ -197,7 +197,7 @@ namespace NCAA_Power_Ratings.Services
 
                     try
                     {
-                        var teams = await context.Teams.ToListAsync(token);
+                        var teams = await context.Team.ToListAsync(token);
                         scrapedGames = new List<Game>();
 
                         // Read games from the file
@@ -253,7 +253,7 @@ namespace NCAA_Power_Ratings.Services
                 }
 
                 // Load existing games for this year and week from database
-                var existing = await context.Games
+                var existing = await context.Game
                     .Where(g => g.Year == year && g.Week == week).ToDictionaryAsync(
                 g => (g.WinnerId, g.LoserId),
                 g => g,
@@ -275,7 +275,7 @@ namespace NCAA_Power_Ratings.Services
                     }
                     else
                     {
-                        context.Games.Add(game);
+                        context.Game.Add(game);
                         added++;
                     }
                 }
@@ -432,7 +432,7 @@ namespace NCAA_Power_Ratings.Services
 
             try
             {
-                var teams = await context.Teams.ToListAsync(token);
+                var teams = await context.Team.ToListAsync(token);
                 var fileGames = new List<Game>();
 
                 // Read games from the file
@@ -455,7 +455,7 @@ namespace NCAA_Power_Ratings.Services
                 }
 
                 // Load existing games for this year and week from database
-                var existing = await context.Games
+                var existing = await context.Game
                     .Where(g => g.Year == year && g.Week == week)
                     .ToDictionaryAsync(
                         g => (g.WinnerId, g.LoserId),
@@ -478,7 +478,7 @@ namespace NCAA_Power_Ratings.Services
                     }
                     else
                     {
-                        context.Games.Add(game);
+                        context.Game.Add(game);
                         added++;
                     }
                 }
@@ -504,7 +504,7 @@ namespace NCAA_Power_Ratings.Services
             {
 
                 // Project each game to two rows (winner and loser), group and aggregate — equivalent to the SQL WITH+UNION approach.
-                var query = context.Games
+                var query = context.Game
                     .Where(g => g.Year > 0);
 
                 if (targetYear.HasValue)
@@ -618,7 +618,7 @@ namespace NCAA_Power_Ratings.Services
                 var summary = await context.TeamRecords
                     .Where(tr => tr.TeamID == teamId && tr.Year == year)
                     .Join(
-                        context.Teams,
+                        context.Team,
                         tr => tr.TeamID,
                         t => t.TeamID,
                         (tr, t) => new TeamSeasonSummaryView
@@ -633,15 +633,15 @@ namespace NCAA_Power_Ratings.Services
                     .FirstOrDefaultAsync(token);
 
                 // Second query: Game-by-game results
-                var games = await context.Games
+                var games = await context.Game
                     .Where(g => g.Year == year && (g.WinnerId == teamId || g.LoserId == teamId))
                     .Join(
-                        context.Teams,
+                        context.Team,
                         g => g.WinnerId,
                         w => w.TeamID,
                         (g, w) => new { Game = g, Winner = w })
                     .Join(
-                        context.Teams,
+                        context.Team,
                         x => x.Game.LoserId,
                         l => l.TeamID,
                         (x, l) => new TeamGameResultView

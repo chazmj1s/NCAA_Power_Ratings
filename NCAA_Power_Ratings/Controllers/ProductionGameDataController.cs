@@ -123,8 +123,8 @@ namespace NCAA_Power_Ratings.Controllers
             {
                 await using var context = await contextFactory.CreateDbContextAsync();
 
-                var totalTeams = await context.Teams.CountAsync();
-                var totalGames = await context.Games.CountAsync();
+                var totalTeams = await context.Team.CountAsync();
+                var totalGames = await context.Game.CountAsync();
                 var totalRecords = await context.TeamRecords.CountAsync();
                 var recordsWithPowerRating = await context.TeamRecords.CountAsync(tr => tr.PowerRating.HasValue);
 
@@ -296,7 +296,7 @@ namespace NCAA_Power_Ratings.Controllers
 
                 // Get team names lookup in batch
                 var teamIds = matchups.SelectMany(m => new[] { m.Team1Id, m.Team2Id }).Distinct().ToList();
-                var teamNames = await context.Teams
+                var teamNames = await context.Team
                     .Where(t => teamIds.Contains(t.TeamID))
                     .ToDictionaryAsync(t => t.TeamID, t => t.TeamName);
 
@@ -542,7 +542,7 @@ namespace NCAA_Power_Ratings.Controllers
                 await using var context = await contextFactory.CreateDbContextAsync();
 
                 // Load all games for the year
-                var games = await context.Games
+                var games = await context.Game
                     .Where(g => g.Year == targetYear)
                     .OrderBy(g => g.Week)
                     .ToListAsync();
@@ -552,7 +552,7 @@ namespace NCAA_Power_Ratings.Controllers
 
                 // Load team metadata keyed by TeamID for conference/tier lookups
                 var teamIds = games.SelectMany(g => new[] { g.WinnerId, g.LoserId }).Distinct().ToList();
-                var teams = await context.Teams
+                var teams = await context.Team
                     .Where(t => teamIds.Contains(t.TeamID))
                     .ToDictionaryAsync(t => t.TeamID);
 
@@ -655,7 +655,7 @@ namespace NCAA_Power_Ratings.Controllers
             {
                 await using var context = await contextFactory.CreateDbContextAsync();
 
-                var teams = await context.Teams
+                var teams = await context.Team
                     .OrderBy(t => t.TeamName)
                     .Select(t => new
                     {
@@ -696,7 +696,7 @@ namespace NCAA_Power_Ratings.Controllers
                     .ToListAsync();
 
                 var teamIds = rivalries.SelectMany(r => new[] { r.Team1Id, r.Team2Id }).Distinct().ToList();
-                var teams = await context.Teams
+                var teams = await context.Team
                     .Where(t => teamIds.Contains(t.TeamID))
                     .ToDictionaryAsync(t => t.TeamID);
 
@@ -743,7 +743,7 @@ namespace NCAA_Power_Ratings.Controllers
             {
                 await using var context = await contextFactory.CreateDbContextAsync();
 
-                var team = await context.Teams.FindAsync(teamId);
+                var team = await context.Team.FindAsync(teamId);
                 if (team == null)
                     return NotFound($"Team {teamId} not found.");
 
@@ -814,15 +814,15 @@ namespace NCAA_Power_Ratings.Controllers
             {
                 await using var context = await contextFactory.CreateDbContextAsync();
 
-                var team1 = await context.Teams.FindAsync(team1Id);
-                var team2 = await context.Teams.FindAsync(team2Id);
+                var team1 = await context.Team.FindAsync(team1Id);
+                var team2 = await context.Team.FindAsync(team2Id);
                 if (team1 == null || team2 == null)
                     return NotFound("One or both teams not found.");
 
                 var cutoffYear = DateTime.Now.Year - years;
 
                 // Games where either team was winner or loser
-                var games = await context.Games
+                var games = await context.Game
                     .Where(g => g.Year >= cutoffYear &&
                         ((g.WinnerId == team1Id && g.LoserId == team2Id) ||
                          (g.WinnerId == team2Id && g.LoserId == team1Id)))
@@ -1118,7 +1118,7 @@ namespace NCAA_Power_Ratings.Controllers
                 var targetYear = year ?? DateTime.Now.Year;
                 await using var context = await contextFactory.CreateDbContextAsync(token);
 
-                var teams = await context.Teams.ToDictionaryAsync(t => t.TeamID, token);
+                var teams = await context.Team.ToDictionaryAsync(t => t.TeamID, token);
                 var records = await context.TeamRecords
                     .Where(tr => tr.Year == targetYear)
                     .ToDictionaryAsync(tr => tr.TeamID, token);
@@ -1128,7 +1128,7 @@ namespace NCAA_Power_Ratings.Controllers
                     .Select(t => t.TeamID)
                     .ToHashSet();
 
-                var allGames = await context.Games
+                var allGames = await context.Game
                     .Where(g => g.Year == targetYear && g.Week < 16)
                     .ToListAsync(token);
 
@@ -1352,7 +1352,7 @@ namespace NCAA_Power_Ratings.Controllers
         /// </summary>
         private async Task<Dictionary<string, List<ConferenceStanding>>> BuildConferenceStandings(NCAAContext context,int year)
         {
-            var teams = await context.Teams.ToDictionaryAsync(t => t.TeamID);
+            var teams = await context.Team.ToDictionaryAsync(t => t.TeamID);
             var records = await context.TeamRecords
                 .Where(tr => tr.Year == year)
                 .ToDictionaryAsync(tr => tr.TeamID);
@@ -1364,7 +1364,7 @@ namespace NCAA_Power_Ratings.Controllers
                 .ToHashSet();
 
             // Load regular season conference games only (week <= 15)
-            var allGames = await context.Games
+            var allGames = await context.Game
                 .Where(g => g.Year == year && g.Week <= 15)
                 .ToListAsync();
 
@@ -1466,7 +1466,7 @@ namespace NCAA_Power_Ratings.Controllers
             int? throughWeek = null,
             CancellationToken token = default)
         {
-            var teams = await context.Teams.ToDictionaryAsync(t => t.TeamID, token);
+            var teams = await context.Team.ToDictionaryAsync(t => t.TeamID, token);
             var records = await context.TeamRecords
                 .Where(tr => tr.Year == year)
                 .ToDictionaryAsync(tr => tr.TeamID, token);
@@ -1478,7 +1478,7 @@ namespace NCAA_Power_Ratings.Controllers
                 .ToHashSet();
 
             // All regular season games
-            var allGames = await context.Games
+            var allGames = await context.Game
                 .Where(g => g.Year == year && g.Week < 16)
                 .ToListAsync(token);
 
