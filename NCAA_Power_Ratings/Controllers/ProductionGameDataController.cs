@@ -23,6 +23,8 @@ namespace NCAA_Power_Ratings.Controllers
         private readonly ProjectionCacheService _projectionCache = projectionCache;
         private readonly WeeklyRankingsService _weeklyRankingsService = weeklyRankingsService;
 
+        #region Predictions
+
         /// <summary>
         /// Predicts the score for a single matchup between two teams.
         /// Location: 'H' = team is home, 'A' = team is away, 'N' = neutral site
@@ -111,6 +113,10 @@ namespace NCAA_Power_Ratings.Controllers
                 return StatusCode(500, ex.Message);
             }
         }
+
+        #endregion
+
+        #region Diagnostics and Queries
 
         /// <summary>
         /// Diagnostic endpoint to check database data availability
@@ -258,6 +264,10 @@ namespace NCAA_Power_Ratings.Controllers
             }
         }
 
+        #endregion
+
+        #region Rankings
+
         /// <summary>
         /// Query matchup histories and detected rivalries.
         /// Omit all parameters or pass tier=ALL to get all matchups.
@@ -389,19 +399,26 @@ namespace NCAA_Power_Ratings.Controllers
                         orderby wr.OverallRank
                         select new
                         {
-                            TeamID         = wr.TeamID,
-                            TeamName       = t.TeamName,
-                            Conference     = t.Conference,
-                            ConferenceAbbr = t.ConferenceAbbr,
-                            Division       = t.Division,
+                            TeamID           = wr.TeamID,
+                            TeamName         = t.TeamName,
+                            Conference       = t.Conference,
+                            ConferenceAbbr   = t.ConferenceAbbr,
+                            Division         = t.Division,
                             wr.OverallRank,
                             wr.TierRank,
                             wr.Ranking,
-                            Year           = (int)wr.Year,
+                            wr.PowerRating,
+                            Year             = (int)wr.Year,
                             wr.Wins,
                             wr.Losses,
                             wr.BaseSOS,
-                            wr.CombinedSOS
+                            wr.CombinedSOS,
+                            wr.AvgPointsScored,
+                            wr.AvgPointsAllowed,
+                            wr.OffensiveZScore,
+                            wr.DefensiveZScore,
+                            wr.OffensiveRank,
+                            wr.DefensiveRank
                         }
                     ).ToListAsync();
 
@@ -417,15 +434,22 @@ namespace NCAA_Power_Ratings.Controllers
                             wr.Conference,
                             wr.ConferenceAbbr,
                             wr.Division,
-                            Tier           = GetConferenceTier(wr.Conference, wr.TeamName),
+                            Tier             = GetConferenceTier(wr.Conference, wr.TeamName),
                             wr.OverallRank,
                             wr.TierRank,
                             wr.Ranking,
+                            wr.PowerRating,
                             wr.Year,
                             wr.Wins,
                             wr.Losses,
                             wr.BaseSOS,
-                            wr.CombinedSOS
+                            wr.CombinedSOS,
+                            wr.AvgPointsScored,
+                            wr.AvgPointsAllowed,
+                            wr.OffensiveZScore,
+                            wr.DefensiveZScore,
+                            wr.OffensiveRank,
+                            wr.DefensiveRank
                         })
                         .ToList();
 
@@ -517,48 +541,9 @@ namespace NCAA_Power_Ratings.Controllers
             }
         }
 
-        /// <summary>
-        /// Computes and saves weekly rankings for a specific year and week.
-        /// Call this after each week's game results are finalized.
-        /// Use backfill=true to compute all played weeks for the year at once.
-        /// Example: POST /api/productiongamedata/computeweekly?year=2025&amp;week=10
-        /// Example: POST /api/productiongamedata/computeweekly?year=2025&amp;backfill=true
-        /// </summary>
-        [HttpPost("computeweekly")]
-        public async Task<IActionResult> ComputeWeeklyRankings(
-            [FromQuery] int? year,
-            [FromQuery] int? week,
-            [FromQuery] bool backfill = false,
-            CancellationToken token = default)
-        {
-            try
-            {
-                var targetYear = year ?? DateTime.Now.Year;
+        #endregion
 
-                if (backfill)
-                {
-                    await _weeklyRankingsService.BackfillYearAsync(targetYear, token);
-                    return Ok(new { message = $"Backfilled all weeks for {targetYear}." });
-                }
-
-                if (!week.HasValue)
-                    return BadRequest("Provide week=N or backfill=true.");
-
-                await _weeklyRankingsService.ComputeAndSaveAsync(targetYear, week.Value, token);
-
-                return Ok(new
-                {
-                    message = $"Computed weekly rankings for {targetYear} week {week.Value}.",
-                    year    = targetYear,
-                    week    = week.Value
-                });
-            }
-            catch (Exception ex)
-            {
-                logger.LogError(ex, "Error computing weekly rankings");
-                return StatusCode(500, "An error occurred computing weekly rankings.");
-            }
-        }
+        #region Schedule
 
         /// <summary>
         /// Get the full schedule for a season with actual and projected scores/O-U.
@@ -676,6 +661,10 @@ namespace NCAA_Power_Ratings.Controllers
                 return StatusCode(500, "An error occurred while retrieving the schedule.");
             }
         }
+
+        #endregion
+
+        #region Teams and Rivalries
 
         /// <summary>
         /// Returns all FBS teams with id, name, short name, conference, and tier.
@@ -958,6 +947,10 @@ namespace NCAA_Power_Ratings.Controllers
                 return StatusCode(500, "An error occurred while retrieving rivalry history.");
             }
         }
+
+        #endregion
+
+        #region Conference Standings and Projections
 
         /// <summary>
         /// Returns the projected conference championship game qualifiers for all
@@ -1340,6 +1333,10 @@ namespace NCAA_Power_Ratings.Controllers
         /// Independent = FBS independents (Army, Liberty, etc.)
         /// Team-name overrides handle edge cases where conference data doesn't reflect competitive tier.
         /// </summary>
+        #endregion
+
+        // ── Private helpers ───────────────────────────────────────────────────────
+
         private static string GetConferenceTier(string? conference, string? teamName = null)
         {
             // Team-name overrides for independents whose tier doesn't match their conference string

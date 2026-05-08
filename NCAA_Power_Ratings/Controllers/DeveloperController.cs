@@ -126,9 +126,7 @@ namespace NCAA_Power_Ratings.Controllers
                 var gamesProcessed = await gameDataService.UpdateGameDataFromFileAsync(filePath, year, week, CancellationToken.None);
 
                 await gameDataService.UpdateTeamRecordsAsync(year);
-                await teamMetrics.SetSOS(year, week);
-                await teamMetrics.CalculatePowerRatings(year);
-                await teamMetrics.CalculateRankings(year);
+                await RecalculateMetricsAsync(year, week);
 
                 var metricsMessage = "TeamRecords, SOS, PowerRating, and Ranking recalculated";
 
@@ -157,6 +155,8 @@ namespace NCAA_Power_Ratings.Controllers
         /// <summary>
         /// Updates game data for a specific year and week by fetching fresh data from the web.
         /// Example: POST /api/developer/updateWeekGames?year=2024&week=10
+        /// NOTE: Keep separate from updateWeekGamesFromFile until a reliable live data
+        /// source is confirmed. Previous source blacklisted the server after bulk scrape.
         /// </summary>
         [HttpPost("updateWeekGames")]
         public async Task<IActionResult> UpdateWeekGames([FromQuery] int year, [FromQuery] int week)
@@ -164,8 +164,8 @@ namespace NCAA_Power_Ratings.Controllers
             try
             {
                 var gamesProcessed = await gameDataService.UpdateGameDataForYearAndWeekAsync(year, week);
-                await teamMetrics.SetSOS(year, week);
-                await teamMetrics.CalculatePowerRatings(year);
+                await gameDataService.UpdateTeamRecordsAsync(year);
+                await RecalculateMetricsAsync(year, week);
 
                 return Ok(new
                 {
@@ -316,9 +316,7 @@ namespace NCAA_Power_Ratings.Controllers
                 var targetYear = year ?? DateTime.Now.Year;
                 var targetWeek = week ?? 0;
 
-                await teamMetrics.SetSOS(targetYear, targetWeek);
-                await teamMetrics.CalculatePowerRatings(targetYear);
-                await teamMetrics.CalculateRankings(targetYear);
+                await RecalculateMetricsAsync(targetYear, targetWeek);
 
                 return Ok(new
                 {
@@ -360,9 +358,7 @@ namespace NCAA_Power_Ratings.Controllers
                 foreach (var year in years)
                 {
                     logger.LogInformation("Processing year {Year}", year);
-                    await teamMetrics.SetSOS((int)year, null);
-                    await teamMetrics.CalculatePowerRatings((int)year);
-                    await teamMetrics.CalculateRankings((int)year);
+                    await RecalculateMetricsAsync((int)year, null);
                 }
 
                 return Ok(new
@@ -886,6 +882,63 @@ namespace NCAA_Power_Ratings.Controllers
             }
         }
 
+        /// <summary>
+        /// Computes and saves WeeklyRankings for a specific year/week, or backfills
+        /// an entire year. Moved here from ProductionGameDataController — admin only.
+        /// Example: POST /api/developer/computeweekly?year=2025&week=10
+        /// Example: POST /api/developer/computeweekly?year=2025&backfill=true
+        /// </summary>
+        [HttpPost("computeweekly")]
+        public async Task<IActionResult> ComputeWeekly(
+            [FromQuery] int? year,
+            [FromQuery] int? week,
+            [FromQuery] bool backfill = false,
+            CancellationToken token = default)
+        {
+            try
+            {
+                var targetYear = year ?? DateTime.Now.Year;
+
+                if (backfill)
+                {
+                    await _weeklyRankingsService.BackfillYearAsync(targetYear, token);
+                    return Ok(new { message = $"Backfilled all weeks for {targetYear}." });
+                }
+
+                if (!week.HasValue)
+                    return BadRequest("Provide week=N or backfill=true.");
+
+                await _weeklyRankingsService.ComputeAndSaveAsync(targetYear, week.Value, token);
+
+                return Ok(new
+                {
+                    message = $"Computed weekly rankings for {targetYear} week {week.Value}.",
+                    year    = targetYear,
+                    week    = week.Value
+                });
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "Error computing weekly rankings for year={Year}, week={Week}", year, week);
+                return StatusCode(500, "An error occurred computing weekly rankings.");
+            }
+        }
+
         #endregion
+
+        // ── Private helpers ───────────────────────────────────────────────────────
+
+        /// <summary>
+        /// Runs the full metrics pipeline in dependency order:
+        ///   SetSOS → CalculatePowerRatings → CalculateRankings
+        /// These three calls must always run sequentially — each reads what the
+        /// previous one wrote to TeamRecords. Do not parallelize.
+        /// </summary>
+        private async Task RecalculateMetricsAsync(int year, int? week)
+        {
+            await teamMetrics.SetSOS(year, week);
+            await teamMetrics.CalculatePowerRatings(year);
+            await teamMetrics.CalculateRankings(year);
+        }
     }
 }
