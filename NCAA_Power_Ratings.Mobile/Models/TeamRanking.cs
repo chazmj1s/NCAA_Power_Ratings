@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.ComponentModel.DataAnnotations.Schema;
 using System.Runtime.CompilerServices;
 
 namespace NCAA_Power_Ratings.Mobile.Models
@@ -24,6 +25,12 @@ namespace NCAA_Power_Ratings.Mobile.Models
         public byte Losses { get; set; }
         public decimal? BaseSOS { get; set; }
         public decimal? CombinedSOS { get; set; }
+        public decimal AvgPointsScored { get; set; }
+        public decimal AvgPointsAllowed { get; set; }
+        public decimal OffensiveZScore { get; set; }
+        public decimal DefensiveZScore { get; set; }
+        public int OffensiveRank { get; set; }
+        public int DefensiveRank { get; set; }
 
         public string Record => $"{Wins}-{Losses}";
 
@@ -38,7 +45,8 @@ namespace NCAA_Power_Ratings.Mobile.Models
             "Independent" => "Ind",
             _ => Tier ?? "N/A"
         };
-
+        public string OffensiveRankDisplay => OffensiveRank > 0 ? $"#{OffensiveRank}" : "—";
+        public string DefensiveRankDisplay => DefensiveRank > 0 ? $"#{DefensiveRank}" : "—";
         public string DisplayConferenceTier => $"{ConferenceAbbr} · {DisplayTierWithRank}";
         public string DisplaySOS => CombinedSOS?.ToString("F4") ?? "N/A";
 
@@ -53,6 +61,20 @@ namespace NCAA_Power_Ratings.Mobile.Models
         {
             get => _isFollowed;
             set { _isFollowed = value; OnPropertyChanged(); }
+        }
+        // Chevron glyph — matches the Contenders pattern in ProjectionsPage
+        public string StatsExpandIcon => IsStatsExpanded ? "▲" : "▼";
+
+        // Only show the toggle link when data is actually available
+        public bool HasOffenseDefenseData =>
+            AvgPointsScored > 0 && OffensiveRank > 0;
+
+        // Expand/collapse state
+        private bool _isStatsExpanded;
+        public bool IsStatsExpanded
+        {
+            get => _isStatsExpanded;
+            set { _isStatsExpanded = value; OnPropertyChanged(); OnPropertyChanged(nameof(StatsExpandIcon)); }
         }
 
         public event PropertyChangedEventHandler? PropertyChanged;

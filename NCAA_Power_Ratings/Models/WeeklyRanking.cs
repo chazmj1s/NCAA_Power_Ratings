@@ -58,5 +58,23 @@ namespace NCAA_Power_Ratings.Models
 
         [ForeignKey("TeamID")]
         public Team? Team { get; set; }
+
+        [Column("AvgPointsScored", TypeName = "decimal(5,2)")]
+        public decimal AvgPointsScored { get; set; }
+
+        [Column("AvgPointsAllowed", TypeName = "decimal(5,2)")]
+        public decimal AvgPointsAllowed { get; set; }
+
+        [Column("OffensiveZScore", TypeName = "decimal(7,4)")]
+        public decimal OffensiveZScore { get; set; }
+
+        [Column("DefensiveZScore", TypeName = "decimal(7,4)")]
+        public decimal DefensiveZScore { get; set; }
+
+        [Column("OffensiveRank")]
+        public int OffensiveRank { get; set; }
+
+        [Column("DefensiveRank")]
+        public int DefensiveRank { get; set; }
     }
 }

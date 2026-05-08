@@ -11,6 +11,14 @@ namespace NCAA_Power_Ratings.Services
     /// Mirrors the TeamMetricsService pipeline (SOS → PowerRating → Ranking) but scoped
     /// to games played through the specified week.
     ///
+    /// Also computes per-team offensive and defensive Z-scores by decomposing each game's
+    /// expected margin into expected points scored / expected points allowed, then measuring
+    /// how far each team's actual scoring and defending deviated from expectation.
+    ///
+    /// New columns populated: AvgPointsScored, AvgPointsAllowed,
+    ///                         OffensiveZScore, DefensiveZScore,
+    ///                         OffensiveRank,   DefensiveRank.
+    ///
     /// Call ComputeAndSaveAsync(year, week) after each week's results are finalized.
     /// </summary>
     public class WeeklyRankingsService
@@ -27,7 +35,7 @@ namespace NCAA_Power_Ratings.Services
         }
 
         /// <summary>
-        /// Runs the full SOS → PowerRating → Ranking pipeline for all FBS teams
+        /// Runs the full SOS → PowerRating → Ranking → Offense/Defense pipeline for all FBS teams
         /// using only games played through the specified week, then upserts the
         /// results into WeeklyRankings.
         /// </summary>
@@ -41,7 +49,7 @@ namespace NCAA_Power_Ratings.Services
             var fbsTeams = allTeams.Where(t => t.Division == "FBS").ToList();
             var fbsIds   = fbsTeams.Select(t => t.TeamID).ToHashSet();
 
-            var avgScoreDeltas  = await context.AvgScoreDeltas.ToListAsync(token);
+            var avgScoreDeltas   = await context.AvgScoreDeltas.ToListAsync(token);
             var matchupHistories = await context.MatchupHistories.ToListAsync(token);
 
             // ── 2. Load only played games through this week ───────────────────────
@@ -105,14 +113,34 @@ namespace NCAA_Power_Ratings.Services
                 })
                 .ToList();
 
-            // ── 5. Compute Z-scores ───────────────────────────────────────────────
+            // ── 5. Compute Z-scores (composite, offensive, defensive) per game ─────
+            //
+            // Expected margin from AvgScoreDeltas is always expressed as:
+            //   higher-win-pct team scored N more points than lower-win-pct team.
+            //
+            // We decompose that margin into two halves to isolate each side of the ball:
+            //   ExpectedTeamScore     = leagueAvgScore + (expectedDeltaFromTeamPerspective / 2)
+            //   ExpectedOpponentScore = leagueAvgScore - (expectedDeltaFromTeamPerspective / 2)
+            //
+            // OffensiveZScore per game = (ActualTeamScore   - ExpectedTeamScore)   / StDev
+            // DefensiveZScore per game = (ExpectedOppScore  - ActualOpponentScore) / StDev
+            //   (positive defensive Z = held opponent below expectation = good defense)
+            //
+            // Both use the same rivalry-adjusted StDev as the composite Z-score so all
+            // three metrics remain on the same scale.
 
             var homeFieldAdvantage = _config.HomeFieldAdvantage;
 
+            // League average score — derived from games in scope so it stays consistent
+            // with the data window rather than relying on a hardcoded constant.
+            double leagueAvgScore = games.Count > 0
+                ? (games.Average(g => (double)g.WPoints) + games.Average(g => (double)g.LPoints)) / 2.0
+                : 28.0;
+
             var withZScores = gameParticipants.Select(gp =>
             {
-                var teamWins    = winsLookup.GetValueOrDefault(gp.TeamId,    0);
-                var teamLosses  = lossesLookup.GetValueOrDefault(gp.TeamId,  0);
+                var teamWins    = winsLookup.GetValueOrDefault(gp.TeamId,     0);
+                var teamLosses  = lossesLookup.GetValueOrDefault(gp.TeamId,   0);
                 var oppWins     = winsLookup.GetValueOrDefault(gp.OpponentId, 0);
                 var oppLosses   = lossesLookup.GetValueOrDefault(gp.OpponentId, 0);
 
@@ -132,10 +160,14 @@ namespace NCAA_Power_Ratings.Services
                 var asd = avgScoreDeltas.FirstOrDefault(
                     a => a.Team1WinPct == maxWinPct && a.Team2WinPct == minWinPct);
 
-                double zScore = 0.0;
+                double zScore    = 0.0;
+                double offZScore = 0.0;
+                double defZScore = 0.0;
+
                 if (asd != null && asd.StDevP != 0)
                 {
-                    var expectedDelta = (double)asd.AverageScoreDelta;
+                    // ── Expected margin from this team's perspective ───────────────
+                    var expectedDelta    = (double)asd.AverageScoreDelta;
                     var expectedFromTeam = teamWinPct >= oppWinPct ? expectedDelta : -expectedDelta;
 
                     if (gp.IsHomeTeam)
@@ -143,6 +175,7 @@ namespace NCAA_Power_Ratings.Services
                     else if (gp.Location != 'N')
                         expectedFromTeam -= homeFieldAdvantage;
 
+                    // ── Rivalry variance adjustment ───────────────────────────────
                     var t1 = Math.Min(gp.TeamId, gp.OpponentId);
                     var t2 = Math.Max(gp.TeamId, gp.OpponentId);
                     var rivalry = matchupHistories.FirstOrDefault(
@@ -161,14 +194,35 @@ namespace NCAA_Power_Ratings.Services
                         };
                     }
 
+                    // ── Composite Z-score (unchanged from original) ───────────────
                     var delta = gp.TeamPoints - gp.OpponentPoints;
                     zScore = (delta - expectedFromTeam) / effectiveStDev;
-
                     if (zScore != 0)
                     {
                         var sign = Math.Sign(zScore);
-                        zScore   = sign * Math.Log(1 + Math.Abs(zScore));
+                        zScore = sign * Math.Log(1 + Math.Abs(zScore));
                     }
+
+                    // ── Decompose margin into per-side expected scores ────────────
+                    // Split the expected margin symmetrically around league average.
+                    // This preserves the margin relationship while giving each unit
+                    // a meaningful per-game expectation to measure against.
+                    var expectedTeamScore = leagueAvgScore + (expectedFromTeam / 2.0);
+                    var expectedOppScore  = leagueAvgScore - (expectedFromTeam / 2.0);
+
+                    // ── Offensive Z-score ─────────────────────────────────────────
+                    // Positive = scored more than expected for this matchup context.
+                    var rawOffZ = (gp.TeamPoints - expectedTeamScore) / effectiveStDev;
+                    offZScore = rawOffZ != 0
+                        ? Math.Sign(rawOffZ) * Math.Log(1 + Math.Abs(rawOffZ))
+                        : 0.0;
+
+                    // ── Defensive Z-score ─────────────────────────────────────────
+                    // Positive = held opponent below what was expected (good defense).
+                    var rawDefZ = (expectedOppScore - gp.OpponentPoints) / effectiveStDev;
+                    defZScore = rawDefZ != 0
+                        ? Math.Sign(rawDefZ) * Math.Log(1 + Math.Abs(rawDefZ))
+                        : 0.0;
                 }
 
                 var divWeight = gp.OpponentDivision == "FCS" ? 0.25 : 1.0;
@@ -180,6 +234,8 @@ namespace NCAA_Power_Ratings.Services
                     gp.OpponentId,
                     gp.OpponentDivision,
                     ZScore    = zScore,
+                    OffZScore = offZScore,
+                    DefZScore = defZScore,
                     DivWeight = divWeight,
                     PerfWeight = zScore switch
                     {
@@ -291,7 +347,59 @@ namespace NCAA_Power_Ratings.Services
                     tierRanks[x.Team.TeamID] = idx++;
             }
 
-            // ── 12. Upsert into WeeklyRankings ────────────────────────────────────
+            // ── 12. Compute per-team offensive / defensive Z-scores ───────────────
+            //
+            // Division-weighted averages keep FCS cupcake games at 25% weight,
+            // consistent with the composite Z-score treatment.
+
+            var offensiveZScores = withZScores
+                .GroupBy(x => x.TeamId)
+                .Select(g => new
+                {
+                    TeamId          = g.Key,
+                    OffensiveZScore = g.Sum(x => x.DivWeight) > 0
+                        ? Math.Round(
+                            g.Sum(x => x.OffZScore * x.DivWeight) /
+                            g.Sum(x => x.DivWeight),
+                            4)
+                        : 0.0
+                })
+                .ToDictionary(x => x.TeamId, x => x.OffensiveZScore);
+
+            var defensiveZScores = withZScores
+                .GroupBy(x => x.TeamId)
+                .Select(g => new
+                {
+                    TeamId          = g.Key,
+                    DefensiveZScore = g.Sum(x => x.DivWeight) > 0
+                        ? Math.Round(
+                            g.Sum(x => x.DefZScore * x.DivWeight) /
+                            g.Sum(x => x.DivWeight),
+                            4)
+                        : 0.0
+                })
+                .ToDictionary(x => x.TeamId, x => x.DefensiveZScore);
+
+            // ── 13. Rank offense and defense among FBS teams with games played ─────
+            //
+            // Teams with no games played receive rank 0.
+            // Higher Z-score = better unit = lower ordinal rank number (1 = best).
+
+            var fbsWithGames = fbsTeams
+                .Where(t => (rawStats[t.TeamID][0] + rawStats[t.TeamID][1]) > 0)
+                .ToList();
+
+            var offensiveRanks = fbsWithGames
+                .OrderByDescending(t => offensiveZScores.GetValueOrDefault(t.TeamID, 0.0))
+                .Select((t, i) => new { t.TeamID, Rank = i + 1 })
+                .ToDictionary(x => x.TeamID, x => x.Rank);
+
+            var defensiveRanks = fbsWithGames
+                .OrderByDescending(t => defensiveZScores.GetValueOrDefault(t.TeamID, 0.0))
+                .Select((t, i) => new { t.TeamID, Rank = i + 1 })
+                .ToDictionary(x => x.TeamID, x => x.Rank);
+
+            // ── 14. Upsert into WeeklyRankings ────────────────────────────────────
 
             var existing = await context.WeeklyRankings
                 .Where(wr => wr.Year == year && wr.Week == week)
@@ -299,42 +407,68 @@ namespace NCAA_Power_Ratings.Services
 
             foreach (var t in fbsTeams)
             {
-                var s    = rawStats[t.TeamID];
-                var rank = ranked.FirstOrDefault(r => r.Team.TeamID == t.TeamID);
+                var s           = rawStats[t.TeamID];
+                var rank        = ranked.FirstOrDefault(r => r.Team.TeamID == t.TeamID);
+                var gamesPlayed = s[0] + s[1];
+
+                // Per-game averages — null when no games played to avoid divide-by-zero
+                decimal avgPtsScored  = gamesPlayed > 0 ? Math.Round((decimal)s[2] / gamesPlayed, 2) : 0;
+                decimal avgPtsAllowed = gamesPlayed > 0 ? Math.Round((decimal)s[3] / gamesPlayed, 2) : 0;
+
+                decimal offZ = gamesPlayed > 0
+                    ? (decimal)Math.Round(offensiveZScores.GetValueOrDefault(t.TeamID, 0.0), 4)
+                    : 0;
+                decimal defZ = gamesPlayed > 0
+                    ? (decimal)Math.Round(defensiveZScores.GetValueOrDefault(t.TeamID, 0.0), 4)
+                    : 0;
+
+                int offRank = offensiveRanks.GetValueOrDefault(t.TeamID, 0);
+                int defRank = defensiveRanks.GetValueOrDefault(t.TeamID, 0);
 
                 if (existing.TryGetValue(t.TeamID, out var row))
                 {
-                    // Update existing row
-                    row.Wins          = (byte)s[0];
-                    row.Losses        = (byte)s[1];
-                    row.PointsFor     = s[2];
-                    row.PointsAgainst = s[3];
-                    row.BaseSOS       = (decimal?)baseSOS.GetValueOrDefault(t.TeamID);
-                    row.SubSOS        = (decimal?)subSOS.GetValueOrDefault(t.TeamID);
-                    row.CombinedSOS   = (decimal?)combinedSOS.GetValueOrDefault(t.TeamID);
-                    row.PowerRating   = (decimal?)powerRatings.GetValueOrDefault(t.TeamID);
-                    row.Ranking       = rankings[t.TeamID];
-                    row.OverallRank   = rank?.OverallRank ?? 0;
-                    row.TierRank      = tierRanks.GetValueOrDefault(t.TeamID, 0);
+                    row.Wins             = (byte)s[0];
+                    row.Losses           = (byte)s[1];
+                    row.PointsFor        = s[2];
+                    row.PointsAgainst    = s[3];
+                    row.BaseSOS          = (decimal?)baseSOS.GetValueOrDefault(t.TeamID);
+                    row.SubSOS           = (decimal?)subSOS.GetValueOrDefault(t.TeamID);
+                    row.CombinedSOS      = (decimal?)combinedSOS.GetValueOrDefault(t.TeamID);
+                    row.PowerRating      = (decimal?)powerRatings.GetValueOrDefault(t.TeamID);
+                    row.Ranking          = rankings[t.TeamID];
+                    row.OverallRank      = rank?.OverallRank ?? 0;
+                    row.TierRank         = tierRanks.GetValueOrDefault(t.TeamID, 0);
+                    row.AvgPointsScored  = avgPtsScored;
+                    row.AvgPointsAllowed = avgPtsAllowed;
+                    row.OffensiveZScore  = offZ;
+                    row.DefensiveZScore  = defZ;
+                    row.OffensiveRank    = offRank;
+                    row.DefensiveRank    = defRank;
                 }
                 else
                 {
                     context.WeeklyRankings.Add(new WeeklyRanking
                     {
-                        TeamID        = t.TeamID,
-                        Year          = (short)year,
-                        Week          = (byte)week,
-                        Wins          = (byte)s[0],
-                        Losses        = (byte)s[1],
-                        PointsFor     = s[2],
-                        PointsAgainst = s[3],
-                        BaseSOS       = (decimal?)baseSOS.GetValueOrDefault(t.TeamID),
-                        SubSOS        = (decimal?)subSOS.GetValueOrDefault(t.TeamID),
-                        CombinedSOS   = (decimal?)combinedSOS.GetValueOrDefault(t.TeamID),
-                        PowerRating   = (decimal?)powerRatings.GetValueOrDefault(t.TeamID),
-                        Ranking       = rankings[t.TeamID],
-                        OverallRank   = rank?.OverallRank ?? 0,
-                        TierRank      = tierRanks.GetValueOrDefault(t.TeamID, 0)
+                        TeamID           = t.TeamID,
+                        Year             = (short)year,
+                        Week             = (byte)week,
+                        Wins             = (byte)s[0],
+                        Losses           = (byte)s[1],
+                        PointsFor        = s[2],
+                        PointsAgainst    = s[3],
+                        BaseSOS          = (decimal?)baseSOS.GetValueOrDefault(t.TeamID),
+                        SubSOS           = (decimal?)subSOS.GetValueOrDefault(t.TeamID),
+                        CombinedSOS      = (decimal?)combinedSOS.GetValueOrDefault(t.TeamID),
+                        PowerRating      = (decimal?)powerRatings.GetValueOrDefault(t.TeamID),
+                        Ranking          = rankings[t.TeamID],
+                        OverallRank      = rank?.OverallRank ?? 0,
+                        TierRank         = tierRanks.GetValueOrDefault(t.TeamID, 0),
+                        AvgPointsScored  = avgPtsScored,
+                        AvgPointsAllowed = avgPtsAllowed,
+                        OffensiveZScore  = offZ,
+                        DefensiveZScore  = defZ,
+                        OffensiveRank    = offRank,
+                        DefensiveRank    = defRank
                     });
                 }
             }

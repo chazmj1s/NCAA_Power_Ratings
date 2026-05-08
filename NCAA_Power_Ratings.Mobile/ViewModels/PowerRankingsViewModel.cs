@@ -48,6 +48,12 @@ namespace NCAA_Power_Ratings.Mobile.ViewModels
                 }
             });
 
+            ToggleStatsExpandCommand = new Microsoft.Maui.Controls.Command<TeamRanking>(t =>
+            {
+                if (t == null) return;
+                t.IsStatsExpanded = !t.IsStatsExpanded;
+            });
+
             // React to shared nav changes
             _navState.PropertyChanged += (s, e) =>
             {
@@ -114,6 +120,8 @@ namespace NCAA_Power_Ratings.Mobile.ViewModels
         public ICommand ApplySortCommand     { get; }
         public ICommand SortColumnCommand    { get; }
         public ICommand SelectFilterCommand  { get; }
+        public ICommand ToggleStatsExpandCommand { get; }
+
 
         // ── Load ──────────────────────────────────────────────────────────
 
