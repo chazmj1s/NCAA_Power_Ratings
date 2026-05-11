@@ -1,33 +1,29 @@
-using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using NCAA_Power_Ratings.Configuration;
 using NCAA_Power_Ratings.Contracts;
-using NCAA_Power_Ratings.Data;
+using NCAA_Power_Ratings.Contracts.Responses;
 using NCAA_Power_Ratings.Interfaces;
 using NCAA_Power_Ratings.Models;
 using NCAA_Power_Ratings.Utilities;
-using NCAA_Power_Ratings.Contracts.Responses;
 
 namespace NCAA_Power_Ratings.Services
 {
     /// <summary>
     /// Encapsulates all data-access and business logic for development/admin operations.
-    /// Uses IUnitOfWork for all data access.
+    /// Pass 2 complete: all EF queries moved to repositories.
+    /// No direct _context references remain.
     /// </summary>
     public class DeveloperService
     {
-        private readonly IUnitOfWork              _uow;
-        private readonly IGameDataService         _gameDataService;
-        private readonly TeamMetricsService       _teamMetrics;
-        private readonly RollingAverageService    _rollingAverageService;
-        private readonly ScoreDeltaCalculator     _scoreDeltaCalculator;
-        private readonly MatchupHistoryCalculator _matchupHistoryCalculator;
-        private readonly WeeklyRankingsService    _weeklyRankingsService;
-        private readonly MetricsConfiguration     _config;
+        private readonly IUnitOfWork               _uow;
+        private readonly IGameDataService          _gameDataService;
+        private readonly TeamMetricsService        _teamMetrics;
+        private readonly RollingAverageService     _rollingAverageService;
+        private readonly ScoreDeltaCalculator      _scoreDeltaCalculator;
+        private readonly MatchupHistoryCalculator  _matchupHistoryCalculator;
+        private readonly WeeklyRankingsService     _weeklyRankingsService;
+        private readonly MetricsConfiguration      _config;
         private readonly ILogger<DeveloperService> _logger;
-
-        // Direct context access retained for Pass 2
-        private readonly NCAAContext _context;
 
         public DeveloperService(
             IUnitOfWork uow,
@@ -49,7 +45,6 @@ namespace NCAA_Power_Ratings.Services
             _weeklyRankingsService    = weeklyRankingsService;
             _config                   = config.Value;
             _logger                   = logger;
-            _context                  = ((Infrastructure.UnitOfWork)uow).Context;
         }
 
         // ── Data loading ──────────────────────────────────────────────────────────
@@ -79,8 +74,7 @@ namespace NCAA_Power_Ratings.Services
             return new
             {
                 message           = $"Successfully processed games for {year} week {week} from file",
-                gamesProcessed,
-                metricsCalculated = "TeamRecords, SOS, PowerRating, and Ranking recalculated",
+                gamesProcessed, metricsCalculated = "TeamRecords, SOS, PowerRating, and Ranking recalculated",
                 year, week, sourceFile = fileName
             };
         }
@@ -90,14 +84,12 @@ namespace NCAA_Power_Ratings.Services
             var gamesProcessed = await _gameDataService.UpdateGameDataForYearAndWeekAsync(year, week);
             await _gameDataService.UpdateTeamRecordsAsync(year);
             await RecalculateMetricsAsync(year, week);
-
             return new { message = $"Successfully updated games for {year} week {week}", gamesProcessed, year, week };
         }
 
         public AvailableFilesResult ListAvailableFiles()
         {
             var dataDir = System.IO.Path.Combine(System.IO.Directory.GetCurrentDirectory(), "NCAA Raw Game Data");
-
             if (!System.IO.Directory.Exists(dataDir))
                 throw new System.IO.DirectoryNotFoundException("NCAA Raw Game Data directory not found.");
 
@@ -119,11 +111,12 @@ namespace NCAA_Power_Ratings.Services
 
         public async Task<BackfillResult> BackfillRollingAveragesAsync(int? startYear, CancellationToken token)
         {
-            var yearsQuery = _context.TeamRecords.Select(tr => (int)tr.Year).Distinct();
-            if (startYear.HasValue)
-                yearsQuery = yearsQuery.Where(y => y >= startYear.Value);
+            var allRecords = await _uow.TeamRecords.GetSinceYearWithTeamsAsync(1960, token);
+            var years      = allRecords.Select(tr => (int)tr.Year).Distinct().OrderBy(y => y).ToList();
 
-            var years = await yearsQuery.OrderBy(y => y).ToListAsync(token);
+            if (startYear.HasValue)
+                years = years.Where(y => y >= startYear.Value).ToList();
+
             if (!years.Any())
                 throw new InvalidOperationException("No TeamRecords found matching the criteria.");
 
@@ -144,14 +137,11 @@ namespace NCAA_Power_Ratings.Services
         {
             var targetYear = year ?? DateTime.Now.Year;
             await _rollingAverageService.ComputeAndPersistAsync(targetYear, week, token);
-
             return new
             {
                 message        = $"Rolling averages computed for {targetYear}" +
                                  (week.HasValue ? $" week {week.Value}" : " (preseason)"),
-                year           = targetYear,
-                week,
-                liveSwapActive = week.HasValue
+                year           = targetYear, week, liveSwapActive = week.HasValue
             };
         }
 
@@ -179,11 +169,8 @@ namespace NCAA_Power_Ratings.Services
 
         public async Task<BackfillResult> BackfillAllMetricsAsync(int? startYear, CancellationToken token)
         {
-            var years = await _context.TeamRecords
-                .Select(tr => tr.Year)
-                .Distinct()
-                .OrderBy(y => y)
-                .ToListAsync(token);
+            var allRecords = await _uow.TeamRecords.GetSinceYearWithTeamsAsync(1960, token);
+            var years      = allRecords.Select(tr => tr.Year).Distinct().OrderBy(y => y).ToList();
 
             if (startYear.HasValue)
                 years = years.Where(y => y >= startYear.Value).ToList();
@@ -203,23 +190,22 @@ namespace NCAA_Power_Ratings.Services
         public async Task<RecalculateScoreDeltasResult> RecalculateScoreDeltasAsync(CancellationToken token)
         {
             await _scoreDeltaCalculator.UpdateAvgScoreDeltasTableAsync();
-            var count = await _context.AvgScoreDeltas.CountAsync(token);
-
+            var deltas = await _uow.Lookups.GetAvgScoreDeltasAsync(token);
             return new RecalculateScoreDeltasResult(
-                "Score deltas recalculated successfully", count,
+                "Score deltas recalculated successfully", deltas.Count,
                 "5% win percentage increments",
                 "Predictions will now use updated delta statistics");
         }
 
         public async Task<RecreateTableResult> RecreateAvgScoreDeltasTableAsync(CancellationToken token)
         {
-            await _context.Database.ExecuteSqlRawAsync("DELETE FROM AvgScoreDeltas", token);
+            await _uow.Lookups.ClearAvgScoreDeltasAsync(token);
             _logger.LogInformation("AvgScoreDeltas table cleared");
 
             await _scoreDeltaCalculator.UpdateAvgScoreDeltasTableAsync();
 
-            var count = await _context.AvgScoreDeltas.CountAsync(token);
-            return new RecreateTableResult("AvgScoreDeltas table recreated successfully", count, "Table cleared and repopulated");
+            var deltas = await _uow.Lookups.GetAvgScoreDeltasAsync(token);
+            return new RecreateTableResult("AvgScoreDeltas table recreated successfully", deltas.Count, "Table cleared and repopulated");
         }
 
         public async Task<MatchupHistoriesResult> CalculateMatchupHistoriesAsync()
@@ -234,14 +220,10 @@ namespace NCAA_Power_Ratings.Services
 
         public async Task<AnalyticsResult> GetAnalyticsAsync(int? startYear, int? endYear, CancellationToken token)
         {
-            var query = _context.TeamRecords
-                .Include(tr => tr.Team)
-                .Where(tr => tr.PowerRating != null);
+            var records = await _uow.TeamRecords.QueryAsync(
+                startYear: startYear, endYear: endYear, limit: int.MaxValue, token: token);
 
-            if (startYear.HasValue) query = query.Where(tr => tr.Year >= startYear.Value);
-            if (endYear.HasValue)   query = query.Where(tr => tr.Year <= endYear.Value);
-
-            var records = await query.ToListAsync(token);
+            records = records.Where(tr => tr.PowerRating != null).ToList();
 
             var overperformers = records
                 .Where(tr => tr.Wins > (tr.CombinedSOS ?? 0) * 12)
@@ -249,8 +231,7 @@ namespace NCAA_Power_Ratings.Services
                 .Take(10)
                 .Select(tr => (object)new
                 {
-                    tr.Year, TeamName = tr.Team?.TeamName,
-                    Record = $"{tr.Wins}-{tr.Losses}",
+                    tr.Year, TeamName = tr.Team?.TeamName, Record = $"{tr.Wins}-{tr.Losses}",
                     tr.CombinedSOS, tr.PowerRating,
                     Overperformance = tr.Wins - (tr.CombinedSOS ?? 0) * 12
                 });
@@ -261,8 +242,7 @@ namespace NCAA_Power_Ratings.Services
                 .Take(10)
                 .Select(tr => (object)new
                 {
-                    tr.Year, TeamName = tr.Team?.TeamName,
-                    Record = $"{tr.Wins}-{tr.Losses}",
+                    tr.Year, TeamName = tr.Team?.TeamName, Record = $"{tr.Wins}-{tr.Losses}",
                     tr.CombinedSOS, tr.PowerRating,
                     Underperformance = (tr.CombinedSOS ?? 0) * 12 - tr.Wins
                 });
@@ -277,46 +257,34 @@ namespace NCAA_Power_Ratings.Services
 
         public async Task<TeamGameAnalysisResult> AnalyzeTeamGamesAsync(int teamId, int? year, CancellationToken token)
         {
-            var targetYear = year ?? DateTime.Now.Year;
+            var targetYear     = year ?? DateTime.Now.Year;
+            var allGames       = await _uow.Games.GetByYearAsync(targetYear, token);
+            var teamGames      = allGames
+                .Where(g => g.WinnerId == teamId || g.LoserId == teamId)
+                .OrderBy(g => g.Week).ToList();
 
-            var gamesFromWinner = _context.Game
-                .Where(g => g.Year == targetYear && g.WinnerId == teamId)
-                .Select(g => new
-                {
-                    g.Week, TeamId = g.WinnerId, TeamName = g.WinnerName,
-                    OpponentId = g.LoserId, OpponentName = g.LoserName,
-                    TeamPoints = g.WPoints, OpponentPoints = g.LPoints,
-                    Delta = g.WPoints - g.LPoints, Result = "W", g.Location,
-                    IsHomeTeam = g.Location == 'W',
-                    LocationDisplay = g.Location == 'W' ? "Home" : g.Location == 'L' ? "Away" : "Neutral"
-                });
-
-            var gamesFromLoser = _context.Game
-                .Where(g => g.Year == targetYear && g.LoserId == teamId)
-                .Select(g => new
-                {
-                    g.Week, TeamId = g.LoserId, TeamName = g.LoserName,
-                    OpponentId = g.WinnerId, OpponentName = g.WinnerName,
-                    TeamPoints = g.LPoints, OpponentPoints = g.WPoints,
-                    Delta = g.LPoints - g.WPoints, Result = "L", g.Location,
-                    IsHomeTeam = g.Location == 'L',
-                    LocationDisplay = g.Location == 'L' ? "Home" : g.Location == 'W' ? "Away" : "Neutral"
-                });
-
-            var games = await gamesFromWinner.Union(gamesFromLoser).OrderBy(g => g.Week).ToListAsync(token);
-
-            var teamRecords    = await _context.TeamRecords.Where(tr => tr.Year == targetYear).ToDictionaryAsync(tr => tr.TeamID, token);
-            var winsLookup     = teamRecords.ToDictionary(kvp => kvp.Key, kvp => (int)kvp.Value.Wins);
-            var lossesLookup   = teamRecords.ToDictionary(kvp => kvp.Key, kvp => (int)kvp.Value.Losses);
+            var teamRecords    = await _uow.TeamRecords.GetByYearAsync(targetYear, token);
+            var winsLookup     = teamRecords.ToDictionary(tr => tr.TeamID, tr => (int)tr.Wins);
+            var lossesLookup   = teamRecords.ToDictionary(tr => tr.TeamID, tr => (int)tr.Losses);
             var avgScoreDeltas = await _uow.Lookups.GetAvgScoreDeltasAsync(token);
             var hfa            = _config.HomeFieldAdvantage;
 
-            var analysis = games.Select(g =>
+            var analysis = teamGames.Select(g =>
             {
-                var teamWins  = winsLookup.GetValueOrDefault(g.TeamId, 0);
-                var teamLosses = lossesLookup.GetValueOrDefault(g.TeamId, 0);
-                var oppWins   = winsLookup.GetValueOrDefault(g.OpponentId, 0);
-                var oppLosses = lossesLookup.GetValueOrDefault(g.OpponentId, 0);
+                bool isWinner       = g.WinnerId == teamId;
+                var teamPoints      = isWinner ? g.WPoints : g.LPoints;
+                var oppPoints       = isWinner ? g.LPoints : g.WPoints;
+                var oppId           = isWinner ? g.LoserId : g.WinnerId;
+                var delta           = teamPoints - oppPoints;
+                bool isHomeTeam     = isWinner ? g.Location == 'W' : g.Location == 'L';
+                var locationDisplay = isHomeTeam ? "Home" : g.Location == 'N' ? "Neutral" : "Away";
+                var result          = isWinner ? "W" : "L";
+                var opponentName    = isWinner ? g.LoserName : g.WinnerName;
+
+                var teamWins   = winsLookup.GetValueOrDefault(teamId, 0);
+                var teamLosses = lossesLookup.GetValueOrDefault(teamId, 0);
+                var oppWins    = winsLookup.GetValueOrDefault(oppId,   0);
+                var oppLosses  = lossesLookup.GetValueOrDefault(oppId, 0);
 
                 var teamWinPct = RatingCalculator.BucketWinPct(teamWins, teamWins + teamLosses);
                 var oppWinPct  = RatingCalculator.BucketWinPct(oppWins,  oppWins  + oppLosses);
@@ -332,24 +300,24 @@ namespace NCAA_Power_Ratings.Services
                     expectedDelta = (double)asd.AverageScoreDelta;
                     var expectedFromTeam = RatingCalculator.ExpectedFromPerspective(expectedDelta, teamWinPct, oppWinPct);
 
-                    if (g.IsHomeTeam)      { expectedFromTeam += hfa; homeAdjustment =  hfa; }
+                    if (isHomeTeam)             { expectedFromTeam += hfa; homeAdjustment =  hfa; }
                     else if (g.Location != 'N') { expectedFromTeam -= hfa; homeAdjustment = -hfa; }
 
-                    zScore = (g.Delta - expectedFromTeam) / (double)asd.StDevP;
+                    zScore = (delta - expectedFromTeam) / (double)asd.StDevP;
                 }
 
-                var baseExpected     = teamWins >= (int)(oppWins) ? expectedDelta : -expectedDelta;
+                var baseExpected     = teamWins >= oppWins ? expectedDelta : -expectedDelta;
                 var adjustedExpected = baseExpected + homeAdjustment;
 
                 return (object)new
                 {
-                    g.Week, g.OpponentName, Location = g.LocationDisplay, g.Result, g.Delta,
+                    g.Week, OpponentName = opponentName, Location = locationDisplay, result, delta,
                     TeamFinalWins         = teamWins, OppFinalWins = oppWins,
                     BaseExpectedDelta     = Math.Round(baseExpected,     1),
                     HomeAdjustment        = Math.Round(homeAdjustment,   1),
                     AdjustedExpectedDelta = Math.Round(adjustedExpected, 1),
-                    ActualDelta           = g.Delta,
-                    Difference            = Math.Round(g.Delta - adjustedExpected, 1),
+                    ActualDelta           = delta,
+                    Difference            = Math.Round(delta - adjustedExpected, 1),
                     ZScore                = Math.Round(zScore, 3),
                     Performance           = zScore > _config.DominantPerformanceThreshold ? "Dominant"
                                           : zScore > _config.UnderperformedThreshold ? "Expected"
@@ -362,8 +330,7 @@ namespace NCAA_Power_Ratings.Services
 
             return new TeamGameAnalysisResult(
                 teamId, targetYear, $"{teamRecord?.Wins}-{teamRecord?.Losses}",
-                teamRecord?.CombinedSOS,
-                Math.Round(avgZScore, 4), teamRecord?.PowerRating,
+                teamRecord?.CombinedSOS, Math.Round(avgZScore, 4), teamRecord?.PowerRating,
                 Math.Round(avgZScore * (double)(teamRecord?.CombinedSOS ?? 1.0m), 4),
                 analysis);
         }
@@ -371,27 +338,22 @@ namespace NCAA_Power_Ratings.Services
         public async Task<TrendsResult> CalculateTrendsAsync(int? teamId, int? year, CancellationToken token)
         {
             var targetYear = year ?? DateTime.Now.Year;
-
-            var query = _context.TeamRecords
-                .Include(tr => tr.Team)
-                .Where(tr => tr.Year == targetYear && tr.PowerRating != null);
+            var records    = await _uow.TeamRecords.GetByYearWithTeamsAsync(targetYear, token);
+            records        = records.Where(tr => tr.PowerRating != null).ToList();
 
             if (teamId.HasValue)
-                query = query.Where(tr => tr.TeamID == teamId.Value);
-
-            var records = await query.ToListAsync(token);
+                records = records.Where(tr => tr.TeamID == teamId.Value).ToList();
 
             var trends = records.Select(tr => (object)new
             {
-                TeamId               = tr.TeamID,
-                TeamName             = tr.Team?.TeamName,
-                tr.Year, Record = $"{tr.Wins}-{tr.Losses}",
+                TeamId                = tr.TeamID, TeamName = tr.Team?.TeamName,
+                tr.Year, Record       = $"{tr.Wins}-{tr.Losses}",
                 tr.PowerRating, tr.CombinedSOS, tr.Ranking,
-                WinPercentage        = (decimal)tr.Wins / (tr.Wins + tr.Losses),
+                WinPercentage         = (decimal)tr.Wins / (tr.Wins + tr.Losses),
                 ProjectedFinalRanking = tr.Ranking,
-                Trend                = tr.PowerRating > 0.02m ? "Ascending"
-                                     : tr.PowerRating < -0.02m ? "Descending"
-                                     : "Stable"
+                Trend                 = tr.PowerRating > 0.02m ? "Ascending"
+                                      : tr.PowerRating < -0.02m ? "Descending"
+                                      : "Stable"
             }).ToList();
 
             return new TrendsResult(targetYear, trends.Count, trends);
@@ -399,15 +361,15 @@ namespace NCAA_Power_Ratings.Services
 
         public async Task<DiagnosticScoreDeltaResult> DiagnosticScoreDeltasAsync(int? year, CancellationToken token)
         {
-            var targetYear = year ?? DateTime.Now.Year;
-
+            var targetYear  = year ?? DateTime.Now.Year;
             var games       = await _uow.Games.GetByYearAsync(targetYear, token);
-            var teamRecords = await _context.TeamRecords.Where(tr => tr.Year == targetYear).ToDictionaryAsync(tr => tr.TeamID, token);
+            var teamRecords = await _uow.TeamRecords.GetByYearAsync(targetYear, token);
+            var recordById  = teamRecords.ToDictionary(tr => tr.TeamID);
 
             var results = games.Select(g =>
             {
-                var winnerRecord = teamRecords.GetValueOrDefault(g.WinnerId);
-                var loserRecord  = teamRecords.GetValueOrDefault(g.LoserId);
+                var winnerRecord = recordById.GetValueOrDefault(g.WinnerId);
+                var loserRecord  = recordById.GetValueOrDefault(g.LoserId);
                 var winnerWins   = winnerRecord?.Wins ?? 0;
                 var loserWins    = loserRecord?.Wins  ?? 0;
 
@@ -415,10 +377,10 @@ namespace NCAA_Power_Ratings.Services
                 {
                     g.WinnerName, WinnerWins = winnerWins, WinnerPoints = g.WPoints,
                     g.LoserName,  LoserWins  = loserWins,  LoserPoints  = g.LPoints,
-                    IsUpset  = winnerWins < loserWins,
+                    IsUpset   = winnerWins < loserWins,
                     Team1Wins = winnerWins >= loserWins ? winnerWins : loserWins,
                     Team2Wins = winnerWins >= loserWins ? loserWins  : winnerWins,
-                    Delta    = winnerWins >= loserWins ? g.WPoints - g.LPoints : g.LPoints - g.WPoints,
+                    Delta     = winnerWins >= loserWins ? g.WPoints - g.LPoints : g.LPoints - g.WPoints,
                     Explanation = winnerWins >= loserWins
                         ? $"Normal: {winnerWins}-win team beat {loserWins}-win team by {g.WPoints - g.LPoints}"
                         : $"UPSET: {winnerWins}-win team beat {loserWins}-win team, delta = {g.LPoints - g.WPoints}"
@@ -438,15 +400,14 @@ namespace NCAA_Power_Ratings.Services
 
         public async Task<WeeklyRankingsBackfillResult> BackfillWeeklyRankingsAsync(int? startYear, CancellationToken token)
         {
-            var query = _context.Game.Where(g => g.WPoints > 0 || g.LPoints > 0);
-            if (startYear.HasValue)
-                query = query.Where(g => g.Year >= startYear.Value);
+            var fromYear = startYear ?? 1960;
+            var allGames = await _uow.Games.GetPlayedGamesSinceYearAsync(fromYear, token);
 
-            var yearWeeks = await query
+            var yearWeeks = allGames
                 .Select(g => new { g.Year, g.Week })
                 .Distinct()
                 .OrderBy(g => g.Year).ThenBy(g => g.Week)
-                .ToListAsync(token);
+                .ToList();
 
             if (!yearWeeks.Any())
                 throw new InvalidOperationException("No played games found matching the criteria.");

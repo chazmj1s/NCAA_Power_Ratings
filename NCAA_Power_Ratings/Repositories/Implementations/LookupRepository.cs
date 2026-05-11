@@ -17,12 +17,23 @@ namespace NCAA_Power_Ratings.Repositories.Implementations
         public Task<List<MatchupHistory>> GetMatchupHistoriesAsync(CancellationToken token = default)
             => _context.MatchupHistories.ToListAsync(token);
 
-        public Task<List<WeeklyRanking>> GetWeeklyRankingsAsync(int year, int week, CancellationToken token = default)
+        public Task<MatchupHistory?> GetMatchupHistoryAsync(
+            int team1Id, int team2Id, CancellationToken token = default)
+            => _context.MatchupHistories.FirstOrDefaultAsync(m =>
+                (m.Team1Id == team1Id && m.Team2Id == team2Id) ||
+                (m.Team1Id == team2Id && m.Team2Id == team1Id), token);
+
+        public Task<List<WeeklyRanking>> GetWeeklyRankingsAsync(
+            int year, int week, CancellationToken token = default)
             => _context.WeeklyRankings
                 .Where(wr => wr.Year == year && wr.Week == week)
                 .ToListAsync(token);
 
-        public async Task AddWeeklyRankingAsync(WeeklyRanking ranking, CancellationToken token = default)
+        public async Task AddWeeklyRankingAsync(
+            WeeklyRanking ranking, CancellationToken token = default)
             => await _context.WeeklyRankings.AddAsync(ranking, token);
+
+        public Task ClearAvgScoreDeltasAsync(CancellationToken token = default)
+    => _context.Database.ExecuteSqlRawAsync("DELETE FROM AvgScoreDeltas", token);
     }
 }

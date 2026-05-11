@@ -13,6 +13,11 @@ namespace NCAA_Power_Ratings.Repositories.Interfaces
             int week,
             CancellationToken token = default);
 
+        Task<List<Game>> GetByYearUpToWeekAsync(
+            int year,
+            int maxWeek,
+            CancellationToken token = default);
+
         Task<List<Game>> GetPlayedGamesByYearAsync(
             int year,
             CancellationToken token = default);
@@ -22,11 +27,17 @@ namespace NCAA_Power_Ratings.Repositories.Interfaces
             int week,
             CancellationToken token = default);
 
-        /// <summary>
-        /// Returns all played games from <paramref name="fromYear"/> onwards.
-        /// Used for league average score calculation across recent seasons.
-        /// </summary>
         Task<List<Game>> GetPlayedGamesSinceYearAsync(
+            int fromYear,
+            CancellationToken token = default);
+
+        Task<List<int>> GetPlayedWeeksByYearAsync(
+            int year,
+            CancellationToken token = default);
+
+        Task<List<Game>> GetRivalryHistoryAsync(
+            int team1Id,
+            int team2Id,
             int fromYear,
             CancellationToken token = default);
 
@@ -38,7 +49,12 @@ namespace NCAA_Power_Ratings.Repositories.Interfaces
             IEnumerable<Game> games,
             CancellationToken token = default);
 
-        Task<List<int>> GetPlayedWeeksByYearAsync(int year, CancellationToken token = default);
-
+        /// <summary>
+        /// Returns all games for the year expanded into winner and loser perspective rows,
+        /// joined with Team for division data. Used by SetSOS and CalculatePowerRatings.
+        /// </summary>
+        Task<List<GameParticipant>> GetGameParticipantsAsync(
+            int year,
+            CancellationToken token = default);
     }
 }

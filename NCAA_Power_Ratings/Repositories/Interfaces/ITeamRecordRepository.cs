@@ -26,14 +26,29 @@ namespace NCAA_Power_Ratings.Repositories.Interfaces
             int year,
             CancellationToken token = default);
 
-        /// <summary>
-        /// Returns records from <paramref name="fromYear"/> up to but not including
-        /// <paramref name="toYearExclusive"/>. Used for rolling average history windows.
-        /// </summary>
         Task<List<TeamRecord>> GetHistoricalAsync(
             int fromYear,
             int toYearExclusive,
             CancellationToken token = default);
+
+        Task<List<TeamRecord>> GetSinceYearWithTeamsAsync(
+            int fromYear,
+            CancellationToken token = default);
+
+        Task<List<TeamRecord>> GetByTeamAllYearsAsync(
+            int teamId,
+            CancellationToken token = default);
+
+        Task<List<TeamRecord>> GetRankedByYearAsync(
+            int year,
+            CancellationToken token = default);
+
+        /// <summary>
+        /// Aggregates wins/losses/points from the Game table and upserts into TeamRecords.
+        /// Uses an in-database UNION+GroupBy to keep the aggregation server-side.
+        /// Optionally scoped to a single year; omit for all years.
+        /// </summary>
+        Task UpsertFromGamesAsync(int? targetYear = null, CancellationToken token = default);
 
         Task<List<TeamRecord>> QueryAsync(
             int? wins = null,

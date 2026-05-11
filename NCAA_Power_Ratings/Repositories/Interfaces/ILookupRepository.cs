@@ -11,7 +11,15 @@ namespace NCAA_Power_Ratings.Repositories.Interfaces
     {
         Task<List<AvgScoreDelta>>  GetAvgScoreDeltasAsync(CancellationToken token = default);
         Task<List<MatchupHistory>> GetMatchupHistoriesAsync(CancellationToken token = default);
-        Task<List<WeeklyRanking>>  GetWeeklyRankingsAsync(int year, int week, CancellationToken token = default);
-        Task                       AddWeeklyRankingAsync(WeeklyRanking ranking, CancellationToken token = default);
+
+        /// <summary>
+        /// Returns the matchup history for a specific rivalry pair.
+        /// Team IDs can be passed in either order.
+        /// </summary>
+        Task<MatchupHistory?> GetMatchupHistoryAsync(int team1Id, int team2Id, CancellationToken token = default);
+
+        Task<List<WeeklyRanking>> GetWeeklyRankingsAsync(int year, int week, CancellationToken token = default);
+        Task AddWeeklyRankingAsync(WeeklyRanking ranking, CancellationToken token = default);
+        Task ClearAvgScoreDeltasAsync(CancellationToken token = default);
     }
 }

@@ -28,16 +28,6 @@ builder.Services.AddDbContext<NCAAContext>(options =>
 }, contextLifetime: ServiceLifetime.Scoped,
    optionsLifetime: ServiceLifetime.Singleton);
 
-// Factory kept for services not yet migrated
-builder.Services.AddDbContextFactory<NCAAContext>(options =>
-{
-    options.UseSqlServer(
-        builder.Configuration.GetConnectionString("DefaultConnection"),
-        sqlOptions => sqlOptions.EnableRetryOnFailure(5, TimeSpan.FromSeconds(30), null));
-    if (builder.Environment.IsDevelopment())
-        options.EnableSensitiveDataLogging();
-});
-
 // Register HttpClient for dependency injection
 builder.Services.AddHttpClient();
 
