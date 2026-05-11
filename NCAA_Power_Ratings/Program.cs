@@ -28,22 +28,12 @@ builder.Services.AddDbContext<NCAAContext>(options =>
 }, contextLifetime: ServiceLifetime.Scoped,
    optionsLifetime: ServiceLifetime.Singleton);
 
-// Factory kept for services not yet migrated
-builder.Services.AddDbContextFactory<NCAAContext>(options =>
-{
-    options.UseSqlServer(
-        builder.Configuration.GetConnectionString("DefaultConnection"),
-        sqlOptions => sqlOptions.EnableRetryOnFailure(5, TimeSpan.FromSeconds(30), null));
-    if (builder.Environment.IsDevelopment())
-        options.EnableSensitiveDataLogging();
-});
-
 // Register HttpClient for dependency injection
 builder.Services.AddHttpClient();
 
-builder.Services.AddTransient<RecordProcessor>();
-builder.Services.AddTransient<ScoreDeltaCalculator>();
-builder.Services.AddTransient<MatchupHistoryCalculator>();
+builder.Services.AddScoped<RecordProcessor>();
+builder.Services.AddScoped<ScoreDeltaCalculator>();
+builder.Services.AddScoped<MatchupHistoryCalculator>();
 
 builder.Services.AddScoped<TeamMetricsService>();
 builder.Services.AddScoped<IGameDataService, GameDataService>();

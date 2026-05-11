@@ -21,10 +21,7 @@ namespace NCAA_Power_Ratings.Repositories.Implementations
             => _context.Team.OrderBy(t => t.TeamName).ToListAsync(token);
 
         public Task<List<Team>> GetFbsTeamsAsync(CancellationToken token = default)
-            => _context.Team
-                .Where(t => t.Division == "FBS")
-                .OrderBy(t => t.TeamName)
-                .ToListAsync(token);
+            => _context.Team.Where(t => t.Division == "FBS").OrderBy(t => t.TeamName).ToListAsync(token);
 
         public Task<Dictionary<int, Team>> GetTeamDictionaryAsync(CancellationToken token = default)
             => _context.Team.ToDictionaryAsync(t => t.TeamID, token);

@@ -1,16 +1,10 @@
-﻿using HtmlAgilityPack;
-using Microsoft.EntityFrameworkCore;
-using Microsoft.EntityFrameworkCore.Internal;
-using NCAA_Power_Ratings.Data;
+using HtmlAgilityPack;
+using NCAA_Power_Ratings.Contracts;
 using NCAA_Power_Ratings.Extensions;
 using NCAA_Power_Ratings.Interfaces;
 using NCAA_Power_Ratings.Models;
 using NCAA_Power_Ratings.ModelViews;
 using NCAA_Power_Ratings.Utilities;
-using System;
-using System.Configuration;
-using System.IO;
-using System.Net;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
 using System.Text.RegularExpressions;
@@ -18,41 +12,41 @@ using System.Text.RegularExpressions;
 namespace NCAA_Power_Ratings.Services
 {
     public class GameDataService(
-        IDbContextFactory<NCAAContext> _contextFactory, 
-        RecordProcessor _recordProcessor, 
-        ScoreDeltaCalculator _scoreDeltaCalc, 
+        IUnitOfWork _uow,
+        RecordProcessor _recordProcessor,
+        ScoreDeltaCalculator _scoreDeltaCalc,
         IConfiguration _configuration,
         IHttpClientFactory _httpClientFactory) : IGameDataService
     {
         public async Task<List<Game>> ExtractGameDataHistoryAsync(int? year)
         {
             var gameDataList = new List<Game>();
-            var httpClient = _httpClientFactory.CreateClient();
-            var tasks = new List<Task<List<Game>>>();
-            var currentYear = DateTime.Now.Month < 8 ? DateTime.Now.Year - 1 : DateTime.Now.Year;
-            var getYear = year ?? currentYear;
+            var httpClient   = _httpClientFactory.CreateClient();
+            var tasks        = new List<Task<List<Game>>>();
+            var currentYear  = DateTime.Now.Month < 8 ? DateTime.Now.Year - 1 : DateTime.Now.Year;
+            var getYear      = year ?? currentYear;
 
-            await using var context = _contextFactory.CreateDbContext();
+            // Load team name→id dictionary once for all parallel scrape tasks
+            var teamsByName = await _uow.Teams.GetTeamDictionaryByNameAsync();
+            var teams = teamsByName.ToDictionary(kvp => kvp.Key, kvp => kvp.Value.TeamID);
 
             while (getYear <= currentYear)
             {
                 string url = $"https://www.sports-reference.com/cfb/years/{getYear}-schedule.html";
-                tasks.Add(ExtractGameDataForSingleYearAsync(httpClient, url, context, getYear));
+                tasks.Add(ExtractGameDataForSingleYearAsync(httpClient, url, teams, getYear));
                 getYear++;
             }
 
             var results = await Task.WhenAll(tasks);
             foreach (var result in results)
-            {
                 gameDataList.AddRange(result);
-            }
 
             if (gameDataList.Count > 0)
             {
                 try
                 {
-                    await context.Game.AddRangeAsync(gameDataList);
-                    await context.SaveChangesAsync();
+                    await _uow.Games.AddRangeAsync(gameDataList);
+                    await _uow.SaveChangesAsync();
                 }
                 catch (Exception ex)
                 {
@@ -63,64 +57,55 @@ namespace NCAA_Power_Ratings.Services
             return gameDataList;
         }
 
-        private static async Task<List<Game>> ExtractGameDataForSingleYearAsync(HttpClient httpClient, string url, NCAAContext context, int year)
+        /// <summary>
+        /// Scrapes a single year's schedule page. Takes a team name dictionary instead of
+        /// a raw context so it remains stateless and safe for parallel execution.
+        /// </summary>
+        private static async Task<List<Game>> ExtractGameDataForSingleYearAsync(
+            HttpClient httpClient,
+            string url,
+            Dictionary<string, int> teamsByName,
+            int year)
         {
             var gameDataList = new List<Game>();
 
             try
             {
-                var html = await httpClient.GetStringAsync(url);
+                var html         = await httpClient.GetStringAsync(url);
                 var htmlDocument = new HtmlDocument();
                 htmlDocument.LoadHtml(html);
 
                 var table = htmlDocument.DocumentNode.SelectSingleNode("//table[@id='schedule']");
-                if (table == null)
-                {
-                    Console.WriteLine($"Schedule table not found for year {year}.");
-                    return gameDataList;
-                }
+                if (table == null) { Console.WriteLine($"Schedule table not found for year {year}."); return gameDataList; }
 
                 var rows = table.SelectNodes(".//tbody/tr");
-                if (rows == null)
-                {
-                    Console.WriteLine($"No rows found in the schedule table for year {year}.");
-                    return gameDataList;
-                }
+                if (rows == null) { Console.WriteLine($"No rows found for year {year}."); return gameDataList; }
 
                 var regex = @"\(\d+\)&nbsp;";
                 foreach (var row in rows)
                 {
-                    if (row.GetAttributeValue("class", "").Contains("thead"))
-                        continue;
+                    if (row.GetAttributeValue("class", "").Contains("thead")) continue;
 
                     var cells = row.SelectNodes(".//td");
-                    if (cells == null || cells.Count < 10)
-                        continue;
+                    if (cells == null || cells.Count < 10) continue;
 
-                    // Extract winnerName and loserName from the appropriate cells
-                    var winnerName = Regex.Replace(cells[4].InnerText, regex, "").Trim();
-                    var loserName = Regex.Replace(cells[7].InnerText, regex, "").Trim();
-
-                    int winnerId = context.Team.FirstOrDefault(t => t.TeamName == winnerName)?.TeamID ?? -1;
-                    int loserId = context.Team.FirstOrDefault(t => t.TeamName == loserName)?.TeamID ?? -1;
-
-                    var siteCellText = cells[6].InnerText.Trim();
+                    var winnerName     = Regex.Replace(cells[4].InnerText, regex, "").Trim();
+                    var loserName      = Regex.Replace(cells[7].InnerText, regex, "").Trim();
+                    var siteCellText   = cells[6].InnerText.Trim();
                     char siteIndicator = siteCellText.Contains('@') ? 'L' : siteCellText.Contains('N') ? 'N' : 'W';
 
-                    var gameData = new Game
+                    gameDataList.Add(new Game
                     {
-                        Week = int.TryParse(cells[0].InnerText.Trim(), out int week) ? week : 0,
-                        WinnerId = winnerId,
+                        Week      = int.TryParse(cells[0].InnerText.Trim(), out int w) ? w : 0,
+                        WinnerId  = teamsByName.GetValueOrDefault(winnerName, -1),
                         WinnerName = winnerName,
-                        WPoints = int.TryParse(cells[5].InnerText.Trim(), out int wpoints) ? wpoints : 0,
-                        Location = siteIndicator,
-                        LoserId = loserId,
+                        WPoints   = int.TryParse(cells[5].InnerText.Trim(), out int wp) ? wp : 0,
+                        Location  = siteIndicator,
+                        LoserId   = teamsByName.GetValueOrDefault(loserName, -1),
                         LoserName = loserName,
-                        LPoints = int.TryParse(cells[8].InnerText.Trim(), out int lpoints) ? lpoints : 0,
-                        Year = year
-                    };
-
-                    gameDataList.Add(gameData);
+                        LPoints   = int.TryParse(cells[8].InnerText.Trim(), out int lp) ? lp : 0,
+                        Year      = year
+                    });
                 }
             }
             catch (Exception ex)
@@ -133,103 +118,65 @@ namespace NCAA_Power_Ratings.Services
 
         public async Task<int> UpdateGameDataForYearAndWeekAsync(int year, int week, CancellationToken token = default)
         {
-            await using var context = await _contextFactory.CreateDbContextAsync(token);
-
             List<Game> scrapedGames;
-            bool usedLocalFile = false;
+            bool usedLocalFile  = false;
             string? actualFileUsed = null;
+
+            var teamsByName = await _uow.Teams.GetTeamDictionaryByNameAsync(token);
+            var teams = teamsByName.ToDictionary(kvp => kvp.Key, kvp => kvp.Value.TeamID);
 
             try
             {
-                // Try to fetch fresh data from the web for the specified year
                 using var httpClient = new HttpClient();
                 string url = $"https://www.sports-reference.com/cfb/years/{year}-schedule.html";
-                scrapedGames = await ExtractGameDataForSingleYearAsync(httpClient, url, context, year);
+                scrapedGames = await ExtractGameDataForSingleYearAsync(httpClient, url, teams, year);
                 Console.WriteLine($"Successfully scraped data from web for year {year}");
             }
             catch (HttpRequestException ex)
             {
                 Console.WriteLine($"Web scraping failed: {ex.Message}");
 
-                // Try to fall back to local file
-                var dataDirectory = _configuration.GetValue<string>("CustomSettings:FilePath", "NCAA Raw Game Data");
-
-                // First, check if the requested year file exists
+                var dataDirectory    = _configuration.GetValue<string>("CustomSettings:FilePath", "NCAA Raw Game Data");
                 var requestedFilePath = Path.Combine(dataDirectory, $"{year}.txt");
-                string? fileToUse = null;
+                string? fileToUse   = null;
 
                 if (File.Exists(requestedFilePath))
                 {
                     fileToUse = requestedFilePath;
-                    Console.WriteLine($"Found data file for requested year {year}");
                 }
-                else
+                else if (Directory.Exists(dataDirectory))
                 {
-                    Console.WriteLine($"Data file not found for year {year}: {requestedFilePath}");
-
-                    // Look for the most recent year file
-                    if (Directory.Exists(dataDirectory))
-                    {
-                        var yearFiles = Directory.GetFiles(dataDirectory, "*.txt")
-                            .Select(f => new
-                            {
-                                FilePath = f,
-                                FileName = Path.GetFileNameWithoutExtension(f),
-                                Year = int.TryParse(Path.GetFileNameWithoutExtension(f), out int y) ? y : (int?)null
-                            })
-                            .Where(f => f.Year.HasValue)
-                            .OrderByDescending(f => f.Year)
-                            .ToList();
-
-                        if (yearFiles.Any())
-                        {
-                            var mostRecentFile = yearFiles.First();
-                            fileToUse = mostRecentFile.FilePath;
-                            Console.WriteLine($"WARNING: Year {year} file not found. Falling back to most recent year file: {mostRecentFile.Year}.txt");
-                            Console.WriteLine($"Note: This may not contain games for year {year} week {week}. Consider performing a manual scrape to initialize year {year}.");
-                        }
-                    }
+                    fileToUse = Directory.GetFiles(dataDirectory, "*.txt")
+                        .Select(f => new { Path = f, Year = int.TryParse(Path.GetFileNameWithoutExtension(f), out int y) ? y : (int?)null })
+                        .Where(f => f.Year.HasValue)
+                        .OrderByDescending(f => f.Year)
+                        .FirstOrDefault()?.Path;
                 }
 
                 if (!string.IsNullOrEmpty(fileToUse))
                 {
-                    Console.WriteLine($"Using local file: {fileToUse}");
-
                     try
                     {
-                        var teams = await context.Team.ToListAsync(token);
+                        var allTeams = await _uow.Teams.GetAllAsync(token);
                         scrapedGames = new List<Game>();
-
-                        // Read games from the file
                         await foreach (var recordInfo in ReadRecordsFromFileAsync(fileToUse, token))
                         {
                             if (recordInfo.Fields.Length >= 9)
-                            {
-                                var gameData = recordInfo.Fields.ToGame(recordInfo.FileName, teams);
-                                scrapedGames.Add(gameData);
-                            }
+                                scrapedGames.Add(recordInfo.Fields.ToGame(recordInfo.FileName, allTeams));
                         }
-
-                        usedLocalFile = true;
+                        usedLocalFile  = true;
                         actualFileUsed = Path.GetFileName(fileToUse);
-                        Console.WriteLine($"Successfully loaded {scrapedGames.Count} games from local file: {actualFileUsed}");
                     }
                     catch (Exception fileEx)
                     {
-                        Console.WriteLine($"Error reading local file: {fileEx.Message}");
                         throw new InvalidOperationException(
-                            $"Web scraping failed and local file read failed. " +
-                            $"Please perform a manual scrape to initialize year {year}. " +
-                            $"Web error: {ex.Message}, File error: {fileEx.Message}", ex);
+                            $"Web scraping failed and local file read failed. Web error: {ex.Message}, File error: {fileEx.Message}", ex);
                     }
                 }
                 else
                 {
-                    Console.WriteLine($"No data files found in directory: {dataDirectory}");
                     throw new InvalidOperationException(
-                        $"Web scraping failed and no local data files found in {dataDirectory}. " +
-                        $"Please perform a manual scrape to initialize year {year}. " +
-                        $"Error: {ex.Message}", ex);
+                        $"Web scraping failed and no local data files found. Error: {ex.Message}", ex);
                 }
             }
             catch (Exception ex) when (ex is not InvalidOperationException)
@@ -240,51 +187,41 @@ namespace NCAA_Power_Ratings.Services
 
             try
             {
-                // Filter to only the games for the specified week
                 var weekGames = scrapedGames.Where(g => g.Week == week).ToList();
 
                 if (weekGames.Count == 0)
                 {
-                    var message = usedLocalFile 
-                        ? $"No games found for year {year}, week {week} in file {actualFileUsed}. The file may not contain data for this year/week combination."
-                        : $"No games found for year {year}, week {week}.";
-                    Console.WriteLine(message);
+                    Console.WriteLine($"No games found for year {year}, week {week}.");
                     return 0;
                 }
 
-                // Load existing games for this year and week from database
-                var existing = await context.Game
-                    .Where(g => g.Year == year && g.Week == week).ToDictionaryAsync(
-                g => (g.WinnerId, g.LoserId),
-                g => g,
-                token);
+                var existing = await _uow.Games.GetByYearAndWeekAsync(year, week, token);
+                var existingDict = existing.ToDictionary(g => (g.WinnerId, g.LoserId));
 
                 int updated = 0, added = 0;
+                var toAdd = new List<Game>();
 
                 foreach (var game in weekGames)
                 {
                     var key = (game.WinnerId, game.LoserId);
-
-                    if (existing.TryGetValue(key, out var dbGame))
+                    if (existingDict.TryGetValue(key, out var dbGame))
                     {
-                        if (ShouldUpdate(dbGame, game))
-                        {
-                            UpdateGameProperties(dbGame, game);
-                            updated++;
-                        }
+                        if (ShouldUpdate(dbGame, game)) { UpdateGameProperties(dbGame, game); updated++; }
                     }
                     else
                     {
-                        context.Game.Add(game);
+                        toAdd.Add(game);
                         added++;
                     }
                 }
 
-                int changes = await context.SaveChangesAsync(token);
+                if (toAdd.Count > 0)
+                    await _uow.Games.AddRangeAsync(toAdd, token);
+
+                await _uow.SaveChangesAsync(token);
 
                 var source = usedLocalFile ? $"local file ({actualFileUsed})" : "web scraping";
-                Console.WriteLine($"Processed {year}-W{week} from {source}: added {added}, updated {updated}, total changes {changes}");
-
+                Console.WriteLine($"Processed {year}-W{week} from {source}: added {added}, updated {updated}");
                 return added + updated;
             }
             catch (Exception ex)
@@ -294,110 +231,70 @@ namespace NCAA_Power_Ratings.Services
             }
         }
 
-        private void UpdateGameProperties(Game dbGame, Game game)
+        private static void UpdateGameProperties(Game dbGame, Game game)
         {
             dbGame.WPoints = game.WPoints;
             dbGame.LPoints = game.LPoints;
         }
 
         private static bool ShouldUpdate(Game dbGame, Game game)
-        {
-            return dbGame.WinnerId == game.WinnerId &&
-                   dbGame.LoserId == game.LoserId &&
-                   (game is { WPoints: 0, LPoints: 0 });
-        }
+            => dbGame.WinnerId == game.WinnerId &&
+               dbGame.LoserId  == game.LoserId  &&
+               game is { WPoints: 0, LPoints: 0 };
 
         public async Task<int> LoadGameHistoryFromFiles()
         {
-            // Retrieve the file path from configuration
             var dataDirectory = _configuration.GetValue<string>("CustomSettings:FilePath", "NCAA Raw Game Data");
-
-            var games = await ProcessDirectoryAsync(dataDirectory);
+            var games         = await ProcessDirectoryAsync(dataDirectory);
             await UpdateTeamRecordsAsync();
             await _scoreDeltaCalc.UpdateAvgScoreDeltasTableAsync();
-
             return games;
-
         }
 
         public async Task<int> ProcessDirectoryAsync(string directoryPath)
         {
             Console.WriteLine($"Starting processing in {directoryPath}...");
-            var tokenSource = new CancellationTokenSource();
-            //var recordProcessor = new RecordProcessor(); // Your processing logic class
+            var tokenSource      = new CancellationTokenSource();
             var recordsProcessed = 0;
-            var yearIn = Path.GetFileNameWithoutExtension(directoryPath);
 
-            // Use Parallel.ForEachAsync for efficient parallel processing of records
             await Parallel.ForEachAsync(
-                ReadRecordsAsync(directoryPath, tokenSource.Token), // The async stream of records
-                tokenSource.Token, // Cancellation token
+                ReadRecordsAsync(directoryPath, tokenSource.Token),
+                tokenSource.Token,
                 async (recordInfo, token) =>
                 {
                     await _recordProcessor.ProcessSingleRecordAsync(recordInfo.Fields, recordInfo.FileName, token);
                     recordsProcessed++;
-                }
-            );
+                });
 
             return recordsProcessed;
         }
 
-        /// <summary>
-        /// Reads records from a single file.
-        /// </summary>
-        /// <param name="filePath">Full path to the file to read</param>
-        /// <param name="token">Cancellation token</param>
-        /// <returns>Async enumerable of FileRecord objects</returns>
-        public async IAsyncEnumerable<FileRecord> ReadRecordsFromFileAsync(string filePath, [EnumeratorCancellation] CancellationToken token = default)
+        public async IAsyncEnumerable<FileRecord> ReadRecordsFromFileAsync(
+            string filePath, [EnumeratorCancellation] CancellationToken token = default)
         {
             string fileName = Path.GetFileNameWithoutExtension(filePath);
-
             await foreach (var line in File.ReadLinesAsync(filePath, token))
             {
-                // Skip empty lines or headers if necessary
-                if (string.IsNullOrEmpty(line) || line.Trim().StartsWith("Rk")) 
+                if (string.IsNullOrEmpty(line) || line.Trim().StartsWith("Rk"))
                     continue;
 
-                // Split the line by comma, trim whitespace from fields
-                var fields = line.Split(',')
-                                 .Select(field => field.Trim())
-                                 .ToArray();
-
+                var fields = line.Split(',').Select(f => f.Trim()).ToArray();
                 yield return new FileRecord(fileName, fields);
             }
         }
 
-        /// <summary>
-        /// Reads records from all .txt files in the specified directory.
-        /// </summary>
-        /// <param name="directoryPath">Path to the directory containing files</param>
-        /// <param name="token">Cancellation token</param>
-        /// <returns>Async enumerable of FileRecord objects from all files</returns>
-        public async IAsyncEnumerable<FileRecord> ReadRecordsAsync(string directoryPath, [EnumeratorCancellation] CancellationToken token = default)
+        public async IAsyncEnumerable<FileRecord> ReadRecordsAsync(
+            string directoryPath, [EnumeratorCancellation] CancellationToken token = default)
         {
-            // Get all .txt files in the directory
             foreach (var filePath in Directory.EnumerateFiles(directoryPath, "*.txt"))
-            {
                 await foreach (var record in ReadRecordsFromFileAsync(filePath, token))
-                {
                     yield return record;
-                }
-            }
         }
 
-        /// <summary>
-        /// Processes a single file from the NCAA Raw Game Data directory.
-        /// Useful for debugging when you want to test processing a specific file.
-        /// </summary>
-        /// <param name="filePath">Full path to the file to process</param>
-        /// <param name="token">Cancellation token</param>
-        /// <returns>Number of records processed</returns>
         public async Task<int> ProcessSingleFileAsync(string filePath, CancellationToken token = default)
         {
             if (!File.Exists(filePath))
-            {
                 throw new FileNotFoundException($"File not found: {filePath}");
-            }
 
             Console.WriteLine($"Processing file: {filePath}");
             var recordsProcessed = 0;
@@ -412,40 +309,21 @@ namespace NCAA_Power_Ratings.Services
             return recordsProcessed;
         }
 
-        /// <summary>
-        /// Parallel method to UpdateGameDataForYearAndWeekAsync that uses a local file instead of web scraping.
-        /// Useful for debugging when the website is inaccessible or for testing with known data.
-        /// </summary>
-        /// <param name="filePath">Full path to the CSV file containing game data for the year</param>
-        /// <param name="year">Year of the games</param>
-        /// <param name="week">Week number to filter and update</param>
-        /// <param name="token">Cancellation token</param>
-        /// <returns>Number of games added or updated</returns>
-        public async Task<int> UpdateGameDataFromFileAsync(string filePath, int year, int week, CancellationToken token = default)
+        public async Task<int> UpdateGameDataFromFileAsync(
+            string filePath, int year, int week, CancellationToken token = default)
         {
             if (!File.Exists(filePath))
-            {
                 throw new FileNotFoundException($"File not found: {filePath}");
-            }
-
-            await using var context = await _contextFactory.CreateDbContextAsync(token);
 
             try
             {
-                var teams = await context.Team.ToListAsync(token);
+                var allTeams  = await _uow.Teams.GetAllAsync(token);
                 var fileGames = new List<Game>();
 
-                // Read games from the file
                 await foreach (var recordInfo in ReadRecordsFromFileAsync(filePath, token))
-                {
                     if (recordInfo.Fields.Length >= 9)
-                    {
-                        var gameData = recordInfo.Fields.ToGame(recordInfo.FileName, teams);
-                        fileGames.Add(gameData);
-                    }
-                }
+                        fileGames.Add(recordInfo.Fields.ToGame(recordInfo.FileName, allTeams));
 
-                // Filter to only the games for the specified week
                 var weekGames = fileGames.Where(g => g.Week == week).ToList();
 
                 if (weekGames.Count == 0)
@@ -454,39 +332,32 @@ namespace NCAA_Power_Ratings.Services
                     return 0;
                 }
 
-                // Load existing games for this year and week from database
-                var existing = await context.Game
-                    .Where(g => g.Year == year && g.Week == week)
-                    .ToDictionaryAsync(
-                        g => (g.WinnerId, g.LoserId),
-                        g => g,
-                        token);
+                var existing     = await _uow.Games.GetByYearAndWeekAsync(year, week, token);
+                var existingDict = existing.ToDictionary(g => (g.WinnerId, g.LoserId));
 
                 int updated = 0, added = 0;
+                var toAdd = new List<Game>();
 
                 foreach (var game in weekGames)
                 {
                     var key = (game.WinnerId, game.LoserId);
-
-                    if (existing.TryGetValue(key, out var dbGame))
+                    if (existingDict.TryGetValue(key, out var dbGame))
                     {
-                        if (ShouldUpdate(dbGame, game))
-                        {
-                            UpdateGameProperties(dbGame, game);
-                            updated++;
-                        }
+                        if (ShouldUpdate(dbGame, game)) { UpdateGameProperties(dbGame, game); updated++; }
                     }
                     else
                     {
-                        context.Game.Add(game);
+                        toAdd.Add(game);
                         added++;
                     }
                 }
 
-                int changes = await context.SaveChangesAsync(token);
+                if (toAdd.Count > 0)
+                    await _uow.Games.AddRangeAsync(toAdd, token);
 
-                Console.WriteLine($"Processed {year}-W{week} from file: added {added}, updated {updated}, total changes {changes}");
+                await _uow.SaveChangesAsync(token);
 
+                Console.WriteLine($"Processed {year}-W{week} from file: added {added}, updated {updated}");
                 return added + updated;
             }
             catch (Exception ex)
@@ -498,180 +369,73 @@ namespace NCAA_Power_Ratings.Services
 
         public async Task UpdateTeamRecordsAsync(int? targetYear = null, CancellationToken token = default)
         {
-            // Use an asynchronous factory so the DbContext gets disposed asynchronously.
-            await using var context = await _contextFactory.CreateDbContextAsync(token);
             try
             {
-
-                // Project each game to two rows (winner and loser), group and aggregate — equivalent to the SQL WITH+UNION approach.
-                var query = context.Game
-                    .Where(g => g.Year > 0);
-
-                if (targetYear.HasValue)
-                {
-                    query = query.Where(g => g.Year == targetYear.Value);
-                }
-
-                var winners = query.Select(g => new
-                {
-                    Year = g.Year,
-                    TeamId = g.WinnerId,
-                    TeamName = g.WinnerName,
-                    Wins = 1,
-                    Losses = 0,
-                    PointsFor = g.WPoints,
-                    PointsAgainst = g.LPoints
-                });
-
-                var losers = query.Select(g => new
-                {
-                    Year = g.Year,
-                    TeamId = g.LoserId,
-                    TeamName = g.LoserName,
-                    Wins = 0,
-                    Losses = 1,
-                    PointsFor = g.LPoints,
-                    PointsAgainst = g.WPoints
-                });
-
-                var combined = winners.Concat(losers);
-
-                // Aggregate in the database into a simple DTO (ints), then materialize.
-                var grouped = await combined
-                    .GroupBy(x => new { x.Year, x.TeamId, x.TeamName })
-                    .Select(g => new
-                    {
-                        Year = g.Key.Year,
-                        TeamId = g.Key.TeamId,
-                        TeamName = g.Key.TeamName,
-                        Wins = g.Sum(x => x.Wins),
-                        Losses = g.Sum(x => x.Losses),
-                        PointsFor = g.Sum(x => x.PointsFor),
-                        PointsAgainst = g.Sum(x => x.PointsAgainst)
-                    })
-                    .ToListAsync(token);
-
-                if (grouped.Count == 0)
-                    return;
-
-                // Map to TeamRecord model with proper casts and upsert.
-                var aggregated = grouped.Select(g => new TeamRecord
-                {
-                    TeamID = g.TeamId,
-                    Year = (short)g.Year,
-                    Wins = (byte)g.Wins,
-                    Losses = (byte)g.Losses,
-                    PointsFor = g.PointsFor,
-                    PointsAgainst = g.PointsAgainst
-                }).ToList();
-
-                // Load existing TeamRecords for affected years into memory for efficient upsert.
-                var years = aggregated.Select(a => a.Year).Distinct().ToList();
-                var existingRecords = await context.TeamRecords
-                    .Where(tr => years.Contains(tr.Year))
-                    .ToListAsync(token);
-
-                // Upsert: update existing records, add missing ones.
-                foreach (var rec in aggregated)
-                {
-                    var exist = existingRecords.FirstOrDefault(e => e.TeamID == rec.TeamID && e.Year == rec.Year);
-                    if (exist != null)
-                    {
-                        exist.Wins = rec.Wins;
-                        exist.Losses = rec.Losses;
-                        exist.PointsFor = rec.PointsFor;
-                        exist.PointsAgainst = rec.PointsAgainst;
-                        // EF Core will track changes; no explicit Update required.
-                    }
-                    else
-                    {
-                        // Avoid adding duplicates if another aggregated entry matches (shouldn't happen after grouping).
-                        context.TeamRecords.Add(rec);
-                    }
-                }
-
-                await context.SaveChangesAsync(token);
+                await _uow.TeamRecords.UpsertFromGamesAsync(targetYear, token);
+                await _uow.SaveChangesAsync(token);
             }
             catch (Exception ex)
             {
                 Console.WriteLine($"Error updating team records: {ex.Message}");
-                Console.WriteLine($"Stack trace: {ex.StackTrace}");
                 if (ex.InnerException != null)
-                {
                     Console.WriteLine($"Inner exception: {ex.InnerException.Message}");
-                }
-                throw; // Re-throw so the controller can log it properly
+                throw;
             }
         }
 
-        /// <summary>
-        /// Gets complete team schedule and summary for a specific team and year.
-        /// Returns JSON string with season summary and game-by-game results.
-        /// </summary>
         public async Task<string> GetTeamScheduleAsJsonAsync(int teamId, int year, CancellationToken token = default)
         {
-            await using var context = await _contextFactory.CreateDbContextAsync(token);
-            
             try
             {
-                // First query: Team season summary
-                var summary = await context.TeamRecords
-                    .Where(tr => tr.TeamID == teamId && tr.Year == year)
-                    .Join(
-                        context.Team,
-                        tr => tr.TeamID,
-                        t => t.TeamID,
-                        (tr, t) => new TeamSeasonSummaryView
-                        {
-                            Year = tr.Year,
-                            TeamName = t.TeamName,
-                            Wins = tr.Wins,
-                            Losses = tr.Losses,
-                            PointsFor = tr.PointsFor,
-                            PointsAgainst = tr.PointsAgainst
-                        })
-                    .FirstOrDefaultAsync(token);
+                var teamRecord = await _uow.TeamRecords.GetByTeamAndYearAsync(teamId, year, token);
+                var team       = await _uow.Teams.GetByIdAsync(teamId, token);
 
-                // Second query: Game-by-game results
-                var games = await context.Game
-                    .Where(g => g.Year == year && (g.WinnerId == teamId || g.LoserId == teamId))
-                    .Join(
-                        context.Team,
-                        g => g.WinnerId,
-                        w => w.TeamID,
-                        (g, w) => new { Game = g, Winner = w })
-                    .Join(
-                        context.Team,
-                        x => x.Game.LoserId,
-                        l => l.TeamID,
-                        (x, l) => new TeamGameResultView
-                        {
-                            Week = x.Game.Week,
-                            Result = x.Game.WinnerId == teamId ? "Win" : "Loss",
-                            Opponent = x.Game.WinnerId == teamId ? x.Game.LoserName : x.Game.WinnerName,
-                            Division = x.Game.WinnerId == teamId ? l.Division : x.Winner.Division,
-                            Conference = x.Game.WinnerId == teamId ? l.ConferenceAbbr : x.Winner.ConferenceAbbr,
-                            Score = x.Game.WinnerId == teamId
-                                ? $"{x.Game.WPoints} - {x.Game.LPoints}"
-                                : $"{x.Game.LPoints} - {x.Game.WPoints}"
-                        })
+                var summary = teamRecord != null && team != null
+                    ? new TeamSeasonSummaryView
+                    {
+                        Year          = teamRecord.Year,
+                        TeamName      = team.TeamName,
+                        Wins          = teamRecord.Wins,
+                        Losses        = teamRecord.Losses,
+                        PointsFor     = teamRecord.PointsFor,
+                        PointsAgainst = teamRecord.PointsAgainst
+                    }
+                    : null;
+
+                var allGames  = await _uow.Games.GetByYearAsync(year, token);
+                var teamGames = allGames
+                    .Where(g => g.WinnerId == teamId || g.LoserId == teamId)
                     .OrderBy(g => g.Week)
-                    .ToListAsync(token);
+                    .ToList();
 
-                var response = new TeamScheduleResponse
+                var allTeams = await _uow.Teams.GetTeamDictionaryAsync(token);
+
+                var games = teamGames.Select(g =>
                 {
-                    Summary = summary,
-                    Games = games
-                };
+                    bool won      = g.WinnerId == teamId;
+                    var oppId     = won ? g.LoserId : g.WinnerId;
+                    allTeams.TryGetValue(oppId, out var opp);
 
-                // Serialize to JSON with readable formatting
-                var options = new JsonSerializerOptions
-                {
-                    WriteIndented = true,
-                    PropertyNamingPolicy = JsonNamingPolicy.CamelCase
-                };
+                    return new TeamGameResultView
+                    {
+                        Week       = g.Week,
+                        Result     = won ? "Win" : "Loss",
+                        Opponent   = won ? g.LoserName  : g.WinnerName,
+                        Division   = opp?.Division,
+                        Conference = opp?.ConferenceAbbr,
+                        Score      = won
+                            ? $"{g.WPoints} - {g.LPoints}"
+                            : $"{g.LPoints} - {g.WPoints}"
+                    };
+                }).ToList();
 
-                return JsonSerializer.Serialize(response, options);
+                return JsonSerializer.Serialize(
+                    new TeamScheduleResponse { Summary = summary, Games = games },
+                    new JsonSerializerOptions
+                    {
+                        WriteIndented        = true,
+                        PropertyNamingPolicy = JsonNamingPolicy.CamelCase
+                    });
             }
             catch (Exception ex)
             {
@@ -681,8 +445,6 @@ namespace NCAA_Power_Ratings.Services
         }
 
         Task<int> IGameDataService.LoadTeamDataFromFile()
-        {
-            throw new NotImplementedException();
-        }
+            => throw new NotImplementedException();
     }
 }

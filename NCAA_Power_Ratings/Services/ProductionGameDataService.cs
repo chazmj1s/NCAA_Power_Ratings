@@ -1,34 +1,13 @@
-using Microsoft.EntityFrameworkCore;
 using NCAA_Power_Ratings.Contracts;
 using NCAA_Power_Ratings.Contracts.Requests;
 using NCAA_Power_Ratings.Contracts.Responses;
-using NCAA_Power_Ratings.Data;
 using NCAA_Power_Ratings.Models;
 
 namespace NCAA_Power_Ratings.Services
 {
-    // ── DTOs ─────────────────────────────────────────────────────────────────────
-
-    public record DiagnosticInfo(
-        string Database,
-        int TotalTeams,
-        int TotalGames,
-        int TotalRecords,
-        int RecordsWithPowerRating,
-        IReadOnlyList<object> YearsWithData,
-        IReadOnlyList<object> YearStats);
-
-    public record RivalryHistoryResult(
-        int Team1Id, string Team1Name, string Team1ShortName,
-        int Team2Id, string Team2Name, string Team2ShortName,
-        string? RivalryName, string? RivalryTier,
-        int GamesPlayed, decimal? AvgMargin, decimal? UpsetRate,
-        IReadOnlyList<object> History, object? CurrentYearProjection);
-    public record ChampionshipQualifiersResult(IReadOnlyList<object> Conferences);
-
     /// <summary>
     /// Encapsulates all data-access and business logic for the production read-only
-    /// endpoints. Uses IUnitOfWork for all data access.
+    /// endpoints. Pass 2 complete: all EF queries moved to repositories.
     /// </summary>
     public class ProductionGameDataService
     {
@@ -38,10 +17,6 @@ namespace NCAA_Power_Ratings.Services
         private readonly WeeklyRankingsService     _weeklyRankingsService;
         private readonly RollingAverageService     _rollingAverageService;
         private readonly ILogger<ProductionGameDataService> _logger;
-
-        // Direct context access retained for Pass 2 — complex joins
-        // will move to repositories in the next pass.
-        private readonly NCAAContext _context;
 
         public ProductionGameDataService(
             IUnitOfWork uow,
@@ -57,7 +32,6 @@ namespace NCAA_Power_Ratings.Services
             _weeklyRankingsService = weeklyRankingsService;
             _rollingAverageService = rollingAverageService;
             _logger                = logger;
-            _context               = ((Infrastructure.UnitOfWork)uow).Context;
         }
 
         // ── Predictions ──────────────────────────────────────────────────────────
@@ -75,25 +49,29 @@ namespace NCAA_Power_Ratings.Services
 
         public async Task<DiagnosticInfo> GetDiagnosticAsync(CancellationToken token = default)
         {
-            var totalTeams             = await _context.Team.CountAsync(token);
-            var totalGames             = await _context.Game.CountAsync(token);
-            var totalRecords           = await _context.TeamRecords.CountAsync(token);
-            var recordsWithPowerRating = await _context.TeamRecords.CountAsync(tr => tr.PowerRating.HasValue, token);
+            var allTeams    = await _uow.Teams.GetAllAsync(token);
+            var allGames    = await _uow.Games.GetByYearAsync(DateTime.Now.Year, token);
+            var allRecords  = await _uow.TeamRecords.GetByYearAsync(DateTime.Now.Year, token);
 
-            var years = await _context.TeamRecords
+            // For totals we need counts across all years — use lookup methods
+            var totalTeams             = allTeams.Count;
+            var yearRecords            = await _uow.TeamRecords.GetSinceYearWithTeamsAsync(1960, token);
+            var totalGames             = (await _uow.Games.GetPlayedGamesSinceYearAsync(1960, token)).Count;
+            var totalRecords           = yearRecords.Count;
+            var recordsWithPowerRating = yearRecords.Count(tr => tr.PowerRating.HasValue);
+
+            var years = yearRecords
                 .Where(tr => tr.PowerRating.HasValue)
                 .Select(tr => tr.Year)
                 .Distinct()
                 .OrderBy(y => y)
-                .ToListAsync(token);
+                .ToList();
 
-            var yearStats = new List<object>();
-            foreach (var year in years)
+            var yearStats = years.Select(y => (object)new
             {
-                var count = await _context.TeamRecords
-                    .CountAsync(tr => tr.Year == year && tr.PowerRating.HasValue, token);
-                yearStats.Add(new { year, teamsWithRankings = count });
-            }
+                year              = y,
+                teamsWithRankings = yearRecords.Count(tr => tr.Year == y && tr.PowerRating.HasValue)
+            }).ToList();
 
             return new DiagnosticInfo("Connected", totalTeams, totalGames, totalRecords,
                 recordsWithPowerRating, years.Select(y => (object)y).ToList(), yearStats);
@@ -148,13 +126,9 @@ namespace NCAA_Power_Ratings.Services
                 var avg = _rollingAverageService.Compute(r, history, useLiveSwap: false);
                 return (object)new
                 {
-                    teamId          = r.TeamID,
-                    teamName        = r.Team?.TeamName,
-                    conference      = r.Team?.ConferenceAbbr,
-                    seedRating      = avg.SeedRating,
-                    trendRating     = avg.TrendRating,
-                    trendHistory    = avg.TrendHistory,
-                    pedigreeRating  = avg.PedigreeRating,
+                    teamId = r.TeamID, teamName = r.Team?.TeamName, conference = r.Team?.ConferenceAbbr,
+                    seedRating = avg.SeedRating, trendRating = avg.TrendRating,
+                    trendHistory = avg.TrendHistory, pedigreeRating = avg.PedigreeRating,
                     pedigreeHistory = avg.PedigreeHistory
                 };
             })
@@ -170,10 +144,7 @@ namespace NCAA_Power_Ratings.Services
             var team = await _uow.Teams.GetByIdAsync(teamId, token)
                        ?? throw new KeyNotFoundException($"Team {teamId} not found.");
 
-            var allRecords = await _context.TeamRecords
-                .Where(tr => tr.TeamID == teamId)
-                .OrderBy(tr => tr.Year)
-                .ToListAsync(token);
+            var allRecords = await _uow.TeamRecords.GetByTeamAllYearsAsync(teamId, token);
 
             if (!allRecords.Any())
                 throw new KeyNotFoundException($"No records found for team {teamId}.");
@@ -189,13 +160,9 @@ namespace NCAA_Power_Ratings.Services
                 var avg = _rollingAverageService.Compute(r, priorRecords, useLiveSwap: false);
                 return (object)new
                 {
-                    year            = (int)r.Year,
-                    wins            = (int)r.Wins,
-                    losses          = (int)r.Losses,
-                    seedRating      = avg.SeedRating,
-                    trendRating     = avg.TrendRating,
-                    trendHistory    = avg.TrendHistory,
-                    pedigreeRating  = avg.PedigreeRating,
+                    year = (int)r.Year, wins = (int)r.Wins, losses = (int)r.Losses,
+                    seedRating = avg.SeedRating, trendRating = avg.TrendRating,
+                    trendHistory = avg.TrendHistory, pedigreeRating = avg.PedigreeRating,
                     pedigreeHistory = avg.PedigreeHistory
                 };
             }).ToList();
@@ -217,33 +184,26 @@ namespace NCAA_Power_Ratings.Services
 
             matchups = matchups.OrderByDescending(m => m.GamesPlayed).ToList();
 
-            var teamIds   = matchups.SelectMany(m => new[] { m.Team1Id, m.Team2Id }).Distinct().ToList();
-            var teamDict  = await _uow.Teams.GetTeamDictionaryAsync(token);
-            var asdList   = await _uow.Lookups.GetAvgScoreDeltasAsync(token);
-            var avgStDev  = asdList.Any() ? asdList.Average(a => (double)a.StDevP) : 15.0;
+            var teamDict = await _uow.Teams.GetTeamDictionaryAsync(token);
+            var asdList  = await _uow.Lookups.GetAvgScoreDeltasAsync(token);
+            var avgStDev = asdList.Any() ? asdList.Average(a => (double)a.StDevP) : 15.0;
 
             var results = new List<object>();
             foreach (var m in matchups)
             {
-                var team1        = teamDict.TryGetValue(m.Team1Id, out var t1) ? t1.TeamName : "Unknown";
-                var team2        = teamDict.TryGetValue(m.Team2Id, out var t2) ? t2.TeamName : "Unknown";
+                var team1         = teamDict.TryGetValue(m.Team1Id, out var t1) ? t1.TeamName : "Unknown";
+                var team2         = teamDict.TryGetValue(m.Team2Id, out var t2) ? t2.TeamName : "Unknown";
                 var varianceRatio = (double)m.StDevMargin / avgStDev;
 
                 if (minVarianceRatio.HasValue && varianceRatio < minVarianceRatio.Value) continue;
 
                 results.Add(new
                 {
-                    team1, team2,
-                    rivalryName   = m.RivalryName ?? "N/A",
-                    tier          = m.RivalryTier ?? "N/A",
-                    gamesPlayed   = m.GamesPlayed,
-                    avgMargin     = Math.Round((double)m.AvgMargin, 1),
-                    stDevMargin   = Math.Round((double)m.StDevMargin, 1),
-                    upsetRate     = Math.Round((double)m.UpsetRate, 3),
-                    varianceRatio = Math.Round(varianceRatio, 2),
-                    seriesAge     = m.LastPlayed - m.FirstPlayed,
-                    firstPlayed   = m.FirstPlayed,
-                    lastPlayed    = m.LastPlayed
+                    team1, team2, rivalryName = m.RivalryName ?? "N/A", tier = m.RivalryTier ?? "N/A",
+                    gamesPlayed = m.GamesPlayed, avgMargin = Math.Round((double)m.AvgMargin, 1),
+                    stDevMargin = Math.Round((double)m.StDevMargin, 1), upsetRate = Math.Round((double)m.UpsetRate, 3),
+                    varianceRatio = Math.Round(varianceRatio, 2), seriesAge = m.LastPlayed - m.FirstPlayed,
+                    firstPlayed = m.FirstPlayed, lastPlayed = m.LastPlayed
                 });
             }
 
@@ -259,52 +219,41 @@ namespace NCAA_Power_Ratings.Services
 
             if (throughWeek.HasValue)
             {
-                var weekly = await (
-                    from wr in _context.WeeklyRankings
-                    join t in _context.Team on wr.TeamID equals t.TeamID
-                    where wr.Year == targetYear && wr.Week == throughWeek.Value && wr.Ranking.HasValue
-                    orderby wr.OverallRank
-                    select new
-                    {
-                        wr.TeamID, t.TeamName, t.Conference, t.ConferenceAbbr, t.Division,
-                        wr.OverallRank, wr.TierRank, wr.Ranking, wr.PowerRating,
-                        Year = (int)wr.Year, wr.Wins, wr.Losses, wr.BaseSOS, wr.CombinedSOS,
-                        wr.AvgPointsScored, wr.AvgPointsAllowed,
-                        wr.OffensiveZScore, wr.DefensiveZScore, wr.OffensiveRank, wr.DefensiveRank
-                    }
-                ).ToListAsync(token);
+                var weekly = await _uow.Lookups.GetWeeklyRankingsAsync(targetYear, throughWeek.Value, token);
 
                 if (!weekly.Any())
                     throw new KeyNotFoundException(
                         $"No weekly rankings found for year {targetYear} week {throughWeek}.");
 
-                var result = weekly.Select(wr => (object)new
-                {
-                    wr.TeamID, wr.TeamName, wr.Conference, wr.ConferenceAbbr, wr.Division,
-                    Tier = RatingCalculator.GetConferenceTier(wr.Conference, wr.TeamName),
-                    wr.OverallRank, wr.TierRank, wr.Ranking, wr.PowerRating, wr.Year,
-                    wr.Wins, wr.Losses, wr.BaseSOS, wr.CombinedSOS,
-                    wr.AvgPointsScored, wr.AvgPointsAllowed,
-                    wr.OffensiveZScore, wr.DefensiveZScore, wr.OffensiveRank, wr.DefensiveRank
-                }).ToList();
+                var teamDict = await _uow.Teams.GetTeamDictionaryAsync(token);
+
+                var result = weekly
+                    .Where(wr => wr.Ranking.HasValue)
+                    .OrderBy(wr => wr.OverallRank)
+                    .Select(wr =>
+                    {
+                        teamDict.TryGetValue(wr.TeamID, out var t);
+                        return (object)new
+                        {
+                            wr.TeamID, TeamName = t?.TeamName, Conference = t?.Conference,
+                            ConferenceAbbr = t?.ConferenceAbbr, Division = t?.Division,
+                            Tier = RatingCalculator.GetConferenceTier(t?.Conference, t?.TeamName),
+                            wr.OverallRank, wr.TierRank, wr.Ranking, wr.PowerRating,
+                            Year = (int)wr.Year, wr.Wins, wr.Losses, wr.BaseSOS, wr.CombinedSOS,
+                            wr.AvgPointsScored, wr.AvgPointsAllowed,
+                            wr.OffensiveZScore, wr.DefensiveZScore, wr.OffensiveRank, wr.DefensiveRank
+                        };
+                    }).ToList();
 
                 return new PowerRankingsResult(true, result);
             }
             else
             {
-                var teamRecords = await (
-                    from tr in _context.TeamRecords
-                    join t in _context.Team on tr.TeamID equals t.TeamID
-                    where tr.Year == targetYear && tr.Ranking.HasValue
-                    select new
-                    {
-                        tr.TeamID, t.TeamName, t.Conference, t.ConferenceAbbr, t.Division,
-                        tr.Ranking, tr.Year, tr.Wins, tr.Losses, tr.BaseSOS, tr.CombinedSOS
-                    }
-                ).ToListAsync(token);
+                var teamRecords = await _uow.TeamRecords.GetByYearWithTeamsAsync(targetYear, token);
+                var ranked      = teamRecords.Where(tr => tr.Ranking.HasValue).ToList();
 
-                var withTiers = teamRecords
-                    .Select(tr => new { TeamRecord = tr, Tier = RatingCalculator.GetConferenceTier(tr.Conference, tr.TeamName) })
+                var withTiers = ranked
+                    .Select(tr => new { TeamRecord = tr, Tier = RatingCalculator.GetConferenceTier(tr.Team?.Conference, tr.Team?.TeamName) })
                     .OrderByDescending(t => t.TeamRecord.Ranking)
                     .ToList();
 
@@ -328,10 +277,10 @@ namespace NCAA_Power_Ratings.Services
                     .Select(t => (object)new
                     {
                         TeamID         = t.TeamRecord.TeamID,
-                        TeamName       = t.TeamRecord.TeamName,
-                        Conference     = t.TeamRecord.Conference,
-                        ConferenceAbbr = t.TeamRecord.ConferenceAbbr,
-                        Division       = t.TeamRecord.Division,
+                        TeamName       = t.TeamRecord.Team?.TeamName,
+                        Conference     = t.TeamRecord.Team?.Conference,
+                        ConferenceAbbr = t.TeamRecord.Team?.ConferenceAbbr,
+                        Division       = t.TeamRecord.Team?.Division,
                         Tier           = t.Tier,
                         OverallRank    = t.OverallRank,
                         TierRank       = tierRankLookup[t.TeamRecord.TeamID],
@@ -358,9 +307,7 @@ namespace NCAA_Power_Ratings.Services
 
             if (games.Count == 0) return new ScheduleResult(Array.Empty<object>());
 
-            var teamIds = games.SelectMany(g => new[] { g.WinnerId, g.LoserId }).Distinct().ToList();
-            var teams   = await _uow.Teams.GetTeamDictionaryAsync(token);
-
+            var teams          = await _uow.Teams.GetTeamDictionaryAsync(token);
             var allProjections = await _projectionCache.GetAllProjections(targetYear, token);
 
             var results = games.Select(g =>
@@ -381,26 +328,17 @@ namespace NCAA_Power_Ratings.Services
 
                 return (object)new
                 {
-                    g.Id, g.Year, g.Week,
-                    GameDate        = g.GameDate,
-                    GameDay         = g.GameDay,
-                    WinnerName      = g.WinnerName,
-                    WinnerShortName = winner?.ShortName ?? g.WinnerName,
-                    WinnerId        = g.WinnerId,
-                    WinnerConf      = winner?.ConferenceAbbr ?? winner?.Conference ?? "",
-                    WinnerTier      = RatingCalculator.GetConferenceTier(winner?.Conference, winner?.TeamName),
-                    WPoints         = g.WPoints,
-                    LoserName       = g.LoserName,
-                    LoserShortName  = loser?.ShortName  ?? g.LoserName,
-                    LoserId         = g.LoserId,
-                    LoserConf       = loser?.ConferenceAbbr ?? loser?.Conference ?? "",
-                    LoserTier       = RatingCalculator.GetConferenceTier(loser?.Conference, loser?.TeamName),
-                    LPoints         = g.LPoints,
-                    Location        = g.Location,
-                    ActualOU        = actualOU,
-                    ProjWinnerScore = projWinner,
-                    ProjLoserScore  = projLoser,
-                    ProjOU          = projOU
+                    g.Id, g.Year, g.Week, GameDate = g.GameDate, GameDay = g.GameDay,
+                    WinnerName = g.WinnerName, WinnerShortName = winner?.ShortName ?? g.WinnerName,
+                    WinnerId = g.WinnerId, WinnerConf = winner?.ConferenceAbbr ?? winner?.Conference ?? "",
+                    WinnerTier = RatingCalculator.GetConferenceTier(winner?.Conference, winner?.TeamName),
+                    WPoints = g.WPoints,
+                    LoserName = g.LoserName, LoserShortName = loser?.ShortName ?? g.LoserName,
+                    LoserId = g.LoserId, LoserConf = loser?.ConferenceAbbr ?? loser?.Conference ?? "",
+                    LoserTier = RatingCalculator.GetConferenceTier(loser?.Conference, loser?.TeamName),
+                    LPoints = g.LPoints, Location = g.Location,
+                    ActualOU = actualOU, ProjWinnerScore = projWinner,
+                    ProjLoserScore = projLoser, ProjOU = projOU
                 };
             }).ToList();
 
@@ -414,12 +352,9 @@ namespace NCAA_Power_Ratings.Services
             var teams = await _uow.Teams.GetAllAsync(token);
             var result = teams.Select(t => (object)new
             {
-                t.TeamID, t.TeamName,
-                ShortName      = t.ShortName ?? t.TeamName,
-                t.Conference,
-                ConferenceAbbr = t.ConferenceAbbr ?? "",
-                t.Division,
-                Tier           = RatingCalculator.GetConferenceTier(t.Conference, t.TeamName)
+                t.TeamID, t.TeamName, ShortName = t.ShortName ?? t.TeamName,
+                t.Conference, ConferenceAbbr = t.ConferenceAbbr ?? "", t.Division,
+                Tier = RatingCalculator.GetConferenceTier(t.Conference, t.TeamName)
             }).ToList();
 
             return new TeamsResult(result);
@@ -433,8 +368,7 @@ namespace NCAA_Power_Ratings.Services
                 .OrderBy(m => m.RivalryTier).ThenBy(m => m.RivalryName)
                 .ToList();
 
-            var teamIds = rivalries.SelectMany(r => new[] { r.Team1Id, r.Team2Id }).Distinct().ToList();
-            var teams   = await _uow.Teams.GetTeamDictionaryAsync(token);
+            var teams = await _uow.Teams.GetTeamDictionaryAsync(token);
 
             var result = rivalries.Select(r =>
             {
@@ -442,12 +376,8 @@ namespace NCAA_Power_Ratings.Services
                 teams.TryGetValue(r.Team2Id, out var t2);
                 return (object)new
                 {
-                    r.Team1Id,
-                    Team1Name      = t1?.TeamName  ?? "Unknown",
-                    Team1ShortName = t1?.ShortName ?? t1?.TeamName ?? "Unknown",
-                    r.Team2Id,
-                    Team2Name      = t2?.TeamName  ?? "Unknown",
-                    Team2ShortName = t2?.ShortName ?? t2?.TeamName ?? "Unknown",
+                    r.Team1Id, Team1Name = t1?.TeamName ?? "Unknown", Team1ShortName = t1?.ShortName ?? t1?.TeamName ?? "Unknown",
+                    r.Team2Id, Team2Name = t2?.TeamName ?? "Unknown", Team2ShortName = t2?.ShortName ?? t2?.TeamName ?? "Unknown",
                     r.RivalryName, r.RivalryTier, r.GamesPlayed,
                     r.AvgMargin, r.StDevMargin, r.UpsetRate, r.FirstPlayed, r.LastPlayed
                 };
@@ -463,35 +393,25 @@ namespace NCAA_Power_Ratings.Services
                        ?? throw new KeyNotFoundException($"Team {teamId} not found.");
 
             var cutoffYear = (short)(DateTime.Now.Year - years);
-            var records    = await _context.TeamRecords
-                .Where(tr => tr.TeamID == teamId && tr.Year >= cutoffYear)
-                .OrderBy(tr => tr.Year)
-                .ToListAsync(token);
+            var records    = await _uow.TeamRecords.GetByTeamAllYearsAsync(teamId, token);
+            records = records.Where(r => r.Year >= cutoffYear).ToList();
 
             var allYears    = records.Select(r => r.Year).Distinct().ToList();
             var ranksByYear = new Dictionary<short, int>();
 
             foreach (var yr in allYears)
             {
-                var allRanked = (await _context.TeamRecords
-                    .Where(tr => tr.Year == yr && tr.Ranking.HasValue)
-                    .ToListAsync(token))
-                    .OrderByDescending(tr => tr.Ranking).ToList();
-
-                var idx = allRanked.FindIndex(tr => tr.TeamID == teamId);
+                var allRanked = await _uow.TeamRecords.GetRankedByYearAsync(yr, token);
+                var idx       = allRanked.FindIndex(tr => tr.TeamID == teamId);
                 if (idx >= 0) ranksByYear[yr] = idx + 1;
             }
 
             var history = records.Select(r => (object)new
             {
-                Year        = (int)r.Year,
-                r.Wins, r.Losses,
-                Record      = $"{r.Wins}-{r.Losses}",
-                PowerRating = r.Ranking,
-                BaseSOS     = r.BaseSOS,
-                CombinedSOS = r.CombinedSOS,
+                Year = (int)r.Year, r.Wins, r.Losses, Record = $"{r.Wins}-{r.Losses}",
+                PowerRating = r.Ranking, BaseSOS = r.BaseSOS, CombinedSOS = r.CombinedSOS,
                 OverallRank = ranksByYear.GetValueOrDefault(r.Year, 0),
-                Tier        = RatingCalculator.GetConferenceTier(team.Conference, team.TeamName)
+                Tier = RatingCalculator.GetConferenceTier(team.Conference, team.TeamName)
             }).ToList();
 
             return new TeamHistoryResult(teamId, team.TeamName, team.ShortName ?? team.TeamName, team.ConferenceAbbr, history);
@@ -505,20 +425,12 @@ namespace NCAA_Power_Ratings.Services
             var team2 = await _uow.Teams.GetByIdAsync(team2Id, token)
                         ?? throw new KeyNotFoundException($"Team {team2Id} not found.");
 
-            var cutoffYear = DateTime.Now.Year - years;
-            var games = await _context.Game
-                .Where(g => g.Year >= cutoffYear &&
-                            ((g.WinnerId == team1Id && g.LoserId == team2Id) ||
-                             (g.WinnerId == team2Id && g.LoserId == team1Id)))
-                .OrderBy(g => g.Year).ThenBy(g => g.Week)
-                .ToListAsync(token);
-
-            var rivalry = await _context.MatchupHistories.FirstOrDefaultAsync(m =>
-                (m.Team1Id == team1Id && m.Team2Id == team2Id) ||
-                (m.Team1Id == team2Id && m.Team2Id == team1Id), token);
-
+            var cutoffYear     = DateTime.Now.Year - years;
+            var games          = await _uow.Games.GetRivalryHistoryAsync(team1Id, team2Id, cutoffYear, token);
+            var rivalry        = await _uow.Lookups.GetMatchupHistoryAsync(team1Id, team2Id, token);
             var avgScoreDeltas = await _uow.Lookups.GetAvgScoreDeltasAsync(token);
-            var avgTeamScore   = games.Count > 0
+
+            var avgTeamScore = games.Count > 0
                 ? (games.Average(g => g.WPoints) + games.Average(g => g.LPoints)) / 2.0
                 : 28.0;
 
@@ -531,11 +443,9 @@ namespace NCAA_Power_Ratings.Services
                 {
                     g.Year, g.Week, g.Location,
                     Team1Score = team1Score, Team2Score = team2Score,
-                    Margin     = team1Score - team2Score,
-                    ActualOU   = g.WPoints + g.LPoints,
-                    Team1Won   = team1Won,
-                    WinnerName = team1Won ? team1.TeamName : team2.TeamName,
-                    Score      = $"{g.WPoints}-{g.LPoints}"
+                    Margin = team1Score - team2Score, ActualOU = g.WPoints + g.LPoints,
+                    Team1Won = team1Won, WinnerName = team1Won ? team1.TeamName : team2.TeamName,
+                    Score = $"{g.WPoints}-{g.LPoints}"
                 };
             }).ToList();
 
@@ -546,14 +456,12 @@ namespace NCAA_Power_Ratings.Services
 
             if (t1Record != null && t2Record != null)
             {
-                var t1Games   = t1Record.Wins + t1Record.Losses;
-                var t2Games   = t2Record.Wins + t2Record.Losses;
-                var t1WinPct  = RatingCalculator.BucketWinPct(t1Record.Wins, t1Games);
-                var t2WinPct  = RatingCalculator.BucketWinPct(t2Record.Wins, t2Games);
-                var maxPct    = Math.Max(t1WinPct, t2WinPct);
-                var minPct    = Math.Min(t1WinPct, t2WinPct);
-                var asd       = avgScoreDeltas.FirstOrDefault(a => a.Team1WinPct == maxPct && a.Team2WinPct == minPct);
-                var delta     = asd != null && asd.SampleSize >= 10
+                var t1WinPct    = RatingCalculator.BucketWinPct(t1Record.Wins, t1Record.Wins + t1Record.Losses);
+                var t2WinPct    = RatingCalculator.BucketWinPct(t2Record.Wins, t2Record.Wins + t2Record.Losses);
+                var maxPct      = Math.Max(t1WinPct, t2WinPct);
+                var minPct      = Math.Min(t1WinPct, t2WinPct);
+                var asd         = avgScoreDeltas.FirstOrDefault(a => a.Team1WinPct == maxPct && a.Team2WinPct == minPct);
+                var delta       = asd != null && asd.SampleSize >= 10
                     ? Math.Max(-35.0, Math.Min(35.0, (double)asd.AverageScoreDelta)) : 7.0;
                 var deltaFromT1 = RatingCalculator.ExpectedFromPerspective(delta, t1WinPct, t2WinPct);
                 if (t1Record.Ranking.HasValue && t2Record.Ranking.HasValue)
@@ -564,12 +472,9 @@ namespace NCAA_Power_Ratings.Services
 
                 projection = new
                 {
-                    Year           = currentYear,
-                    ProjTeam1Score = projT1,
-                    ProjTeam2Score = projT2,
-                    ProjMargin     = Math.Round(projT1 - projT2, 1),
-                    ProjOU         = Math.Round(projT1 + projT2, 1),
-                    IsProjected    = true
+                    Year = currentYear, ProjTeam1Score = projT1, ProjTeam2Score = projT2,
+                    ProjMargin = Math.Round(projT1 - projT2, 1), ProjOU = Math.Round(projT1 + projT2, 1),
+                    IsProjected = true
                 };
             }
 
@@ -587,20 +492,20 @@ namespace NCAA_Power_Ratings.Services
         public async Task<ChampionshipQualifiersResult> GetChampionshipQualifiersAsync(
             int? year, CancellationToken token = default)
         {
-            var targetYear             = year ?? DateTime.Now.Year;
-            var standingsByConference  = await BuildConferenceStandingsAsync(targetYear, token);
-            var service                = new ConferenceChampionshipService();
-            var results                = BuildQualifierResponse(standingsByConference, service, includeContenders: false);
+            var targetYear            = year ?? DateTime.Now.Year;
+            var standingsByConference = await BuildConferenceStandingsAsync(targetYear, token);
+            var service               = new ConferenceChampionshipService();
+            var results               = BuildQualifierResponse(standingsByConference, service, includeContenders: false);
             return new ChampionshipQualifiersResult(results);
         }
 
         public async Task<ChampionshipQualifiersResult> GetProjectedChampionshipQualifiersAsync(
             int? year, int? throughWeek, CancellationToken token = default)
         {
-            var targetYear             = year ?? DateTime.Now.Year;
-            var standingsByConference  = await BuildProjectedConferenceStandingsAsync(targetYear, throughWeek, token);
-            var service                = new ConferenceChampionshipService();
-            var results                = BuildQualifierResponse(standingsByConference, service, includeContenders: true, throughWeek: throughWeek);
+            var targetYear            = year ?? DateTime.Now.Year;
+            var standingsByConference = await BuildProjectedConferenceStandingsAsync(targetYear, throughWeek, token);
+            var service               = new ConferenceChampionshipService();
+            var results               = BuildQualifierResponse(standingsByConference, service, includeContenders: true, throughWeek: throughWeek);
             return new ChampionshipQualifiersResult(results);
         }
 
@@ -609,7 +514,6 @@ namespace NCAA_Power_Ratings.Services
         {
             var targetYear = year ?? DateTime.Now.Year;
             var teams      = await _uow.Teams.GetTeamDictionaryAsync(token);
-
             var fbsTeamIds = teams.Values.Where(t => t.Division == "FBS").Select(t => t.TeamID).ToHashSet();
 
             var allGames = await _uow.Games.GetByYearAsync(targetYear, token);
@@ -654,15 +558,12 @@ namespace NCAA_Power_Ratings.Services
                         if (won) actualWins++; else actualLosses++;
                         var teamScore = won ? g.WPoints : g.LPoints;
                         var oppScore  = won ? g.LPoints : g.WPoints;
-
                         return (object)new
                         {
-                            g.Week, Opponent = oppName,
-                            Location    = isHome ? "vs" : "@",
-                            Result      = won ? "W" : "L",
-                            Score       = $"{teamScore}-{oppScore}",
-                            ProjScore   = (string?)null, Confidence = (string?)null,
-                            Type        = "Actual", NeutralSite = g.Location == 'N'
+                            g.Week, Opponent = oppName, Location = isHome ? "vs" : "@",
+                            Result = won ? "W" : "L", Score = $"{teamScore}-{oppScore}",
+                            ProjScore = (string?)null, Confidence = (string?)null,
+                            Type = "Actual", NeutralSite = g.Location == 'N'
                         };
                     }
                     else
@@ -685,14 +586,10 @@ namespace NCAA_Power_Ratings.Services
 
                         return (object)new
                         {
-                            g.Week, Opponent = oppName,
-                            Location    = isHome ? "vs" : "@",
-                            Result      = projWin ? "W" : "L",
-                            Score       = (string?)null,
-                            ProjScore   = projTeamScore > 0 ? $"{Math.Round(projTeamScore)}-{Math.Round(projOppScore)}" : null,
-                            Confidence  = confidence,
-                            Type        = "Projected",
-                            NeutralSite = g.Location == 'N'
+                            g.Week, Opponent = oppName, Location = isHome ? "vs" : "@",
+                            Result = projWin ? "W" : "L", Score = (string?)null,
+                            ProjScore = projTeamScore > 0 ? $"{Math.Round(projTeamScore)}-{Math.Round(projOppScore)}" : null,
+                            Confidence = confidence, Type = "Projected", NeutralSite = g.Location == 'N'
                         };
                     }
                 }).ToList();
@@ -703,15 +600,12 @@ namespace NCAA_Power_Ratings.Services
 
                 return (object)new
                 {
-                    team.TeamName,
-                    Conference       = team.ConferenceAbbr,
-                    Division         = RatingCalculator.GetDivision(team.TeamName, team.ConferenceAbbr),
-                    ActualWins       = actualWins,
-                    ActualLosses     = actualLosses,
-                    ProjectedWins    = totalWins,
-                    ProjectedLosses  = totalLosses,
-                    ProjectedWinPct  = Math.Round(total > 0 ? (double)totalWins / total : 0.0, 3),
-                    Games            = gameDetails,
+                    team.TeamName, Conference = team.ConferenceAbbr,
+                    Division = RatingCalculator.GetDivision(team.TeamName, team.ConferenceAbbr),
+                    ActualWins = actualWins, ActualLosses = actualLosses,
+                    ProjectedWins = totalWins, ProjectedLosses = totalLosses,
+                    ProjectedWinPct = Math.Round(total > 0 ? (double)totalWins / total : 0.0, 3),
+                    Games = gameDetails,
                     SimulatedThrough = throughWeek.HasValue ? $"Week {throughWeek}" : "Current"
                 };
             }).ToList();
@@ -765,13 +659,9 @@ namespace NCAA_Power_Ratings.Services
             var teams      = await _uow.Teams.GetTeamDictionaryAsync(token);
             var records    = await _uow.TeamRecords.GetByYearAsync(year, token);
             var recordById = records.ToDictionary(tr => tr.TeamID);
-
             var fbsTeamIds = teams.Values.Where(t => t.Division == "FBS").Select(t => t.TeamID).ToHashSet();
 
-            var allGames = await _context.Game
-                .Where(g => g.Year == year && g.Week <= 15)
-                .ToListAsync(token);
-
+            var allGames  = await _uow.Games.GetByYearUpToWeekAsync(year, 15, token);
             var confGames = allGames.Where(g =>
                 fbsTeamIds.Contains(g.WinnerId) && fbsTeamIds.Contains(g.LoserId) &&
                 teams.TryGetValue(g.WinnerId, out var w) && teams.TryGetValue(g.LoserId, out var l) &&
@@ -785,8 +675,7 @@ namespace NCAA_Power_Ratings.Services
                     recordById.TryGetValue(t.TeamID, out var rec);
                     return new ConferenceStanding
                     {
-                        TeamId            = t.TeamID, TeamName = t.TeamName,
-                        Conference        = t.ConferenceAbbr,
+                        TeamId = t.TeamID, TeamName = t.TeamName, Conference = t.ConferenceAbbr,
                         Division          = RatingCalculator.GetDivision(t.TeamName, t.ConferenceAbbr),
                         ConferenceWins    = confGames.Count(g => g.WinnerId == t.TeamID),
                         ConferenceLosses  = confGames.Count(g => g.LoserId  == t.TeamID),
@@ -811,10 +700,9 @@ namespace NCAA_Power_Ratings.Services
         private async Task<Dictionary<string, List<ConferenceStanding>>> BuildProjectedConferenceStandingsAsync(
             int year, int? throughWeek, CancellationToken token)
         {
-            var teams   = await _uow.Teams.GetTeamDictionaryAsync(token);
-            var records = await _uow.TeamRecords.GetByYearAsync(year, token);
+            var teams      = await _uow.Teams.GetTeamDictionaryAsync(token);
+            var records    = await _uow.TeamRecords.GetByYearAsync(year, token);
             var recordById = records.ToDictionary(tr => tr.TeamID);
-
             var fbsTeamIds = teams.Values.Where(t => t.Division == "FBS").Select(t => t.TeamID).ToHashSet();
 
             var allGames = await _uow.Games.GetByYearAsync(year, token);
@@ -856,13 +744,11 @@ namespace NCAA_Power_Ratings.Services
                     var actualLosses = playedConfGames.Count(g => g.LoserId  == t.TeamID);
                     var projWins     = projectedResults.Count(r => r.WinnerId == t.TeamID && unplayedConfGames.Any(g => g.Id == r.GameId));
                     var projLosses   = projectedResults.Count(r => r.LoserId  == t.TeamID && unplayedConfGames.Any(g => g.Id == r.GameId));
-
                     recordById.TryGetValue(t.TeamID, out var rec);
 
                     return new ConferenceStanding
                     {
-                        TeamId            = t.TeamID, TeamName = t.TeamName,
-                        Conference        = t.ConferenceAbbr,
+                        TeamId = t.TeamID, TeamName = t.TeamName, Conference = t.ConferenceAbbr,
                         Division          = RatingCalculator.GetDivision(t.TeamName, t.ConferenceAbbr),
                         ConferenceWins    = actualWins + projWins,
                         ConferenceLosses  = actualLosses + projLosses,
