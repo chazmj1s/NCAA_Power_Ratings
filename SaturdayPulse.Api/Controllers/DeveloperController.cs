@@ -823,6 +823,48 @@ namespace SaturdayPulse.Controllers
         }
 
         /// <summary>
+        /// Backfills the Projections table for every year/week combination in the database,
+        /// starting from 1965 (or the provided startYear).
+        ///
+        /// For each week snapshot, projects all remaining regular-season games
+        /// using the ratings that existed at that point in time (i.e. the WeeklyRankings
+        /// power ratings for that year/week, not current ratings).
+        ///
+        /// Long-running — expect several minutes for a full 61-year backfill.
+        /// Safe to re-run; rows are upserted on (GameId, Year, Week).
+        ///
+        /// Example: POST /api/developer/backfillProjections
+        /// Example: POST /api/developer/backfillProjections?startYear=2010
+        /// </summary>
+        [HttpPost("backfillProjections")]
+        [Tags("Analytics and Diagnostics")]
+        public async Task<IActionResult> BackfillProjections(
+            [FromQuery] int? startYear,
+            CancellationToken token = default)
+        {
+            try
+            {
+                var result = await developerService.BackfillProjectionsAsync(startYear, token);
+                return Ok(new
+                {
+                    message = result.Message,
+                    processed = result.Processed,
+                    startYear = result.StartYear
+                });
+            }
+            catch (InvalidOperationException ex)
+            {
+                return NotFound(ex.Message);
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "Error during Projections backfill");
+                return StatusCode(500, "An error occurred during projections backfill.");
+            }
+        }
+
+
+        /// <summary>
         /// Computes and saves WeeklyRankings for a specific year/week, or backfills an entire year.
         /// Example: POST /api/developer/computeweekly?year=2025&week=10
         /// Example: POST /api/developer/computeweekly?year=2025&backfill=true

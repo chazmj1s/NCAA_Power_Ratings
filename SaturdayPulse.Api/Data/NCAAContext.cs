@@ -20,6 +20,7 @@ namespace SaturdayPulse.Data
         public DbSet<Games>                  Games                   { get; set; }
         public DbSet<Lines>                  Lines                   { get; set; }
         public DbSet<TeamsConferenceHistory> TeamsConferenceHistory  { get; set; }
+        public DbSet<Projection> Projections { get; set; } = null!;
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
@@ -36,10 +37,9 @@ namespace SaturdayPulse.Data
             modelBuilder.Entity<MatchupHistory>()
                 .HasKey(m => new { m.Team1Id, m.Team2Id });
 
-            modelBuilder.Entity<WeeklyRanking>()
-                .HasIndex(w => new { w.TeamID, w.Year, w.Week })
-                .IsUnique();
-
+            modelBuilder.Entity<Projection>().ToTable("Projections", t => t.ExcludeFromMigrations());
+            modelBuilder.Entity<WeeklyRanking>().ToTable("WeeklyRankings", t => t.ExcludeFromMigrations());
+            
             modelBuilder.Entity<TeamConferenceHistory>(entity =>
             {
                 entity.HasIndex(e => new { e.TeamID, e.StartYear })

@@ -10,11 +10,14 @@ namespace SaturdayPulse.Contracts
         IGameRepository       Game       { get; }
         ILookupRepository     Lookups     { get; }
 
+
         // ── CFBD V2 repositories ──────────────────────────────────────────────
         IConferenceRepository Conferences { get; }
         ITeamsRepository      TeamsV2     { get; }
         IGamesRepository      GamesV2     { get; }
         ILinesRepository      Lines       { get; }
+        IProjectionRepository Projections { get; }
+        IWeeklyRankingsRepository WeeklyRankings { get; }
 
         Task<int> SaveChangesAsync(CancellationToken token = default);
     }

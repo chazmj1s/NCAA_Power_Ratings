@@ -1,5 +1,6 @@
 using SaturdayPulse.Contracts;
 using SaturdayPulse.Data;
+using SaturdayPulse.Repositories;
 using SaturdayPulse.Repositories.Implementations;
 using SaturdayPulse.Repositories.Interfaces;
 
@@ -24,6 +25,8 @@ namespace SaturdayPulse.Infrastructure
         public ITeamsRepository      TeamsV2     { get; }
         public IGamesRepository      GamesV2     { get; }
         public ILinesRepository      Lines       { get; }
+        public IProjectionRepository Projections { get; }
+        public IWeeklyRankingsRepository WeeklyRankings { get; }
 
         public UnitOfWork(NCAAContext context)
         {
@@ -40,6 +43,8 @@ namespace SaturdayPulse.Infrastructure
             TeamsV2     = new TeamsRepository(_context);
             GamesV2     = new GamesRepository(_context);
             Lines       = new LinesRepository(_context);
+            Projections = new ProjectionRepository(_context);
+            WeeklyRankings = new WeeklyRankingsRepository(_context);
         }
 
         public Task<int> SaveChangesAsync(CancellationToken token = default)

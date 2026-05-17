@@ -20,9 +20,6 @@ namespace SaturdayPulse.Repositories.Interfaces
         /// </summary>
         Task<MatchupHistory?> GetMatchupHistoryAsync(int team1Id, int team2Id, CancellationToken token = default);
 
-        Task<List<WeeklyRanking>> GetWeeklyRankingsAsync(int year, int week, CancellationToken token = default);
-        Task AddWeeklyRankingAsync(WeeklyRanking ranking, CancellationToken token = default);
-
         Task ClearAvgScoreDeltasAsync(CancellationToken token = default);
         Task ClearMatchupHistoriesAsync(CancellationToken token = default);
         Task AddMatchupHistoriesAsync(IEnumerable<MatchupHistory> histories, CancellationToken token = default);
