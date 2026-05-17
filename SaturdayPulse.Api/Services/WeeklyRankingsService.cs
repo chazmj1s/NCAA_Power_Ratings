@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Options;
 using SaturdayPulse.Configuration;
 using SaturdayPulse.Contracts;
+using SaturdayPulse.Contracts.Requests;
 using SaturdayPulse.Models;
 
 namespace SaturdayPulse.Services
@@ -15,13 +16,16 @@ namespace SaturdayPulse.Services
     {
         private readonly IUnitOfWork          _uow;
         private readonly MetricsConfiguration _config;
+        private readonly GamePredictionService _predictionService;
 
         public WeeklyRankingsService(
-            IUnitOfWork uow,
+            IUnitOfWork uow, 
+            GamePredictionService predictionService,
             IOptions<MetricsConfiguration> config)
         {
             _uow    = uow;
             _config = config.Value;
+            _predictionService = predictionService;
         }
 
         /// <summary>
@@ -230,7 +234,7 @@ namespace SaturdayPulse.Services
                 .ToDictionary(x => x.TeamID, x => x.Rank);
 
             // ── 14. Upsert into WeeklyRankings ────────────────────────────────────
-            var existing = await _uow.Lookups.GetWeeklyRankingsAsync(year, week, token);
+            var existing = await _uow.WeeklyRankings.GetByYearAndWeekAsync(year, week, token);
             var existingByTeam = existing.ToDictionary(wr => wr.TeamID);
 
             foreach (var t in fbsTeams)
@@ -268,7 +272,7 @@ namespace SaturdayPulse.Services
                 }
                 else
                 {
-                    await _uow.Lookups.AddWeeklyRankingAsync(new WeeklyRanking
+                    await _uow.WeeklyRankings.AddAsync(new WeeklyRanking
                     {
                         TeamID           = t.TeamID,
                         Year             = (short)year,
@@ -315,6 +319,60 @@ namespace SaturdayPulse.Services
                 record.DefensiveZScore  = gamesPlayed > 0 ? (decimal)Math.Round(defensiveZScores.GetValueOrDefault(t.TeamID, 0.0), 4) : 0;
                 record.OffensiveRank    = offensiveRanks.GetValueOrDefault(t.TeamID, 0);
                 record.DefensiveRank    = defensiveRanks.GetValueOrDefault(t.TeamID, 0);
+            }
+            // ── Step 16: Compute and persist projections for remaining schedule ───────────
+
+            var allGames = await _uow.Game.GetByYearAsync(year, token);
+            var teamsByName = await _uow.Team.GetTeamDictionaryByNameAsync(token);
+            var teamsById = teamsByName.Values.ToDictionary(t => t.TeamID);
+
+            // Project all games that haven't been played yet.
+            // "Unplayed" = no final score recorded (adjust the predicate to match
+            // whatever convention your Game model uses, e.g. WPoints == 0, IsPlayed == false, etc.)
+            var maxWeek = allGames.Max(g => g.Week);
+            var remainingGames = allGames
+                .Where(g => g.Week < maxWeek && !g.IsPlayed)          // ← adjust IsPlayed as needed
+                .ToList();
+
+            var matchupRequests = remainingGames
+                .Where(g => teamsById.ContainsKey(g.WinnerId) && teamsById.ContainsKey(g.LoserId))
+                .Select(g => new MatchupRequest
+                {
+                    TeamName = teamsById[g.WinnerId].TeamName,
+                    OpponentName = teamsById[g.LoserId].TeamName,
+                    Location = g.Location,
+                    Week = g.Week
+                })
+                .ToList();
+
+            if (matchupRequests.Count > 0)
+            {
+                var predictions = await _predictionService.PredictMatchups(year, matchupRequests, token);
+
+                var projections = new List<Projection>(remainingGames.Count);
+
+                foreach (var g in remainingGames)
+                {
+                    if (!teamsById.TryGetValue(g.WinnerId, out var homeTeam)) continue;
+                    if (!teamsById.TryGetValue(g.LoserId,  out var awayTeam)) continue;
+
+                    var pred = predictions.FirstOrDefault(p =>
+                        p.TeamName     == homeTeam.TeamName &&
+                        p.OpponentName == awayTeam.TeamName &&
+                        p.Week         == g.Week);
+
+                    if (pred == null) continue;
+
+                    projections.Add(GamePredictionService.BuildProjection(
+                        prediction: pred,
+                        gameId:     g.Id,
+                        year:       year,
+                        week:       week,
+                        homeTeamId: g.WinnerId,
+                        awayTeamId: g.LoserId));
+                }
+
+                await _uow.Projections.UpsertManyAsync(projections, token);
             }
 
             await _uow.SaveChangesAsync(token);

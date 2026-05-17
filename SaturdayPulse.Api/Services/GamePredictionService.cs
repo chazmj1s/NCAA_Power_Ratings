@@ -8,7 +8,11 @@ namespace SaturdayPulse.Services
     /// <summary>
     /// Predicts game scores based on team metrics and historical data.
     /// Uses IUnitOfWork for all data access — no direct EF/DbContext references.
-    /// Statistical calculation logic is unchanged.
+    ///
+    /// Changes from previous version:
+    ///   • BuildProjection() added — maps a GamePrediction + game context to a
+    ///     Projection model ready for persistence. Win probability is sourced
+    ///     directly from GamePrediction.WinProbability / OpponentWinProbability.
     /// </summary>
     public class GamePredictionService
     {
@@ -74,6 +78,48 @@ namespace SaturdayPulse.Services
             }
 
             return predictions.OrderByDescending(p => Math.Abs(p.ExpectedMargin)).ToList();
+        }
+
+        // ── Projection builder ────────────────────────────────────────────────────
+
+        /// <summary>
+        /// Maps a computed GamePrediction + game metadata to a Projection row
+        /// ready for persistence. Called by WeeklyRankingsService step 16.
+        ///
+        /// Convention: Location == 'H' means TeamName is the home team.
+        /// For neutral-site games the WinnerId slot is treated as home
+        /// (arbitrary but consistent — spread sign is still meaningful).
+        /// </summary>
+        public static Projection BuildProjection(
+            GamePrediction prediction,
+            int gameId, int year, int week,
+            int homeTeamId, int awayTeamId)
+        {
+            // ExpectedMargin is always from TeamName's perspective.
+            // Flip sign when TeamName is the away team so spread reads home-relative.
+            var homeSpread = prediction.Location == 'H'
+                ? prediction.ExpectedMargin
+                : -prediction.ExpectedMargin;
+
+            var total = prediction.PredictedTeamScore + prediction.PredictedOpponentScore;
+
+            // WinProbability on GamePrediction is for TeamName.
+            // When TeamName is home that IS HomeWinProbability; otherwise flip.
+            var homeWinProb = prediction.Location == 'H'
+                ? prediction.WinProbability
+                : prediction.OpponentWinProbability;
+
+            return new Projection
+            {
+                GameId             = gameId,
+                Year               = year,
+                Week               = week,
+                HomeTeamId         = homeTeamId,
+                AwayTeamId         = awayTeamId,
+                PredictedSpread    = (decimal)Math.Round(homeSpread,   1),
+                PredictedTotal     = (decimal)Math.Round(total,        1),
+                HomeWinProbability = (decimal)Math.Round(homeWinProb,  4)
+            };
         }
 
         // ── Core prediction ───────────────────────────────────────────────────────

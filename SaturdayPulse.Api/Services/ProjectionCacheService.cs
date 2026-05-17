@@ -71,9 +71,9 @@ namespace SaturdayPulse.Services
 
                 var teams = await _uow.Team.GetTeamDictionaryAsync(token);
                 var allGames = await _uow.Game.GetByYearAsync(year, token);
-
+                var maxWeek = allGames.Max(g => g.Week);
                 // Filter to regular season only
-                var regularSeasonGames = allGames.Where(g => g.Week < 16).ToList();
+                var regularSeasonGames = allGames.Where(g => g.Week < maxWeek).ToList();
 
                 // Build matchup requests for ALL games (played and unplayed)
                 var matchupRequests = regularSeasonGames

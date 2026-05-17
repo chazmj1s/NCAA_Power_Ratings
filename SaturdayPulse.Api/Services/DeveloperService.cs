@@ -2,6 +2,7 @@ using Microsoft.Extensions.Options;
 using SaturdayPulse.Api.Contracts.Responses;
 using SaturdayPulse.Configuration;
 using SaturdayPulse.Contracts;
+using SaturdayPulse.Contracts.Requests;
 using SaturdayPulse.Contracts.Responses;
 using SaturdayPulse.Interfaces;
 using SaturdayPulse.Models;
@@ -23,6 +24,7 @@ namespace SaturdayPulse.Services
         private readonly ScoreDeltaCalculator      _scoreDeltaCalculator;
         private readonly MatchupHistoryCalculator  _matchupHistoryCalculator;
         private readonly WeeklyRankingsService     _weeklyRankingsService;
+        private readonly GamePredictionService     _predictionService;
         private readonly MetricsConfiguration      _config;
         private readonly ILogger<DeveloperService> _logger;
 
@@ -34,6 +36,7 @@ namespace SaturdayPulse.Services
             ScoreDeltaCalculator scoreDeltaCalculator,
             MatchupHistoryCalculator matchupHistoryCalculator,
             WeeklyRankingsService weeklyRankingsService,
+            GamePredictionService predictionService,
             IOptions<MetricsConfiguration> config,
             ILogger<DeveloperService> logger)
         {
@@ -44,6 +47,7 @@ namespace SaturdayPulse.Services
             _scoreDeltaCalculator     = scoreDeltaCalculator;
             _matchupHistoryCalculator = matchupHistoryCalculator;
             _weeklyRankingsService    = weeklyRankingsService;
+            _predictionService        = predictionService;
             _config                   = config.Value;
             _logger                   = logger;
         }
@@ -479,5 +483,155 @@ namespace SaturdayPulse.Services
             await _weeklyRankingsService.ComputeAndSaveAsync(targetYear, week.Value, token);
             return new ComputeWeeklyResult($"Computed weekly rankings for {targetYear} week {week.Value}.", targetYear, week.Value);
         }
+
+        /// <summary>
+        /// Backfills the Projections table for every year/week in the database.
+        ///
+        /// Strategy mirrors BackfillWeeklyRankingsAsync:
+        ///   • Discover all distinct (Year, Week) snapshots from WeeklyRankings
+        ///     (guarantees ratings exist for each slot we try to project from).
+        ///   • For each snapshot, fetch unplayed games in that season from that
+        ///     week onward, run predictions using that snapshot's power ratings,
+        ///     and upsert into Projections.
+        ///
+        /// "Unplayed at week W" = regular-season games with Week > snapshotWeek
+        /// that have no recorded score yet (or equivalently, all future-week games
+        /// relative to the snapshot — historical backfill treats every game after
+        /// the snapshot week as "remaining").
+        /// </summary>
+        public async Task<BackfillResult> BackfillProjectionsAsync(
+            int? startYear, CancellationToken token = default)
+        {
+            const int firstYear = 1965;
+            var effectiveStart = startYear ?? firstYear;
+
+            // All distinct (Year, Week) pairs that have WeeklyRankings data,
+            // filtered by startYear, ordered chronologically.
+            var snapshots = await _uow.WeeklyRankings
+                .GetDistinctYearWeeksAsync(token);               // returns List<(int Year, int Week)>
+
+            snapshots = snapshots
+                .Where(s => s.Year >= effectiveStart)
+                .OrderBy(s => s.Year).ThenBy(s => s.Week)
+                .ToList();
+
+            if (snapshots.Count == 0)
+                throw new InvalidOperationException(
+                    $"No WeeklyRankings data found from {effectiveStart} onward.");
+
+            // Cache data that doesn't change across the loop.
+            var teamsById = await _uow.Team.GetTeamDictionaryAsync(token);
+            var teamsByName = teamsById.Values.ToDictionary(t => t.TeamName);
+            var avgScoreDeltas = await _uow.Lookups.GetAvgScoreDeltasAsync(token);
+            var rivalries = await _uow.Lookups.GetMatchupHistoriesAsync(token);
+
+            int processed = 0;
+
+            foreach (var (snapshotYear, snapshotWeek) in snapshots)
+            {
+                token.ThrowIfCancellationRequested();
+
+                // All regular-season games for this year.
+                var allGames = await _uow.Game.GetByYearAsync(snapshotYear, token);
+
+                // "Remaining" from this snapshot's perspective = weeks after the snapshot.
+                // For a historical backfill every game in week > snapshotWeek is "unplayed".
+                var maxWeek = allGames.Max(g => g.Week); 
+                var remainingGames = allGames
+                    .Where(g => g.Week > snapshotWeek && g.Week <= maxWeek)
+                    .ToList();
+
+                if (remainingGames.Count == 0) continue;
+
+                // Fetch the power ratings as they stood at this snapshot.
+                var weeklyRankings = await _uow.WeeklyRankings
+                    .GetByYearAndWeekAsync(snapshotYear, snapshotWeek, token);
+
+                // Build a PowerRating lookup by TeamId for this snapshot.
+                var powerByTeamId = weeklyRankings
+                    .Where(wr => wr.PowerRating.HasValue)
+                    .ToDictionary(wr => wr.TeamID, wr => wr.PowerRating!.Value);
+
+                // Build MatchupRequests, injecting snapshot power ratings.
+                var matchupRequests = new List<MatchupRequest>(remainingGames.Count);
+
+                foreach (var g in remainingGames)
+                {
+                    if (!teamsById.TryGetValue(g.WinnerId, out var homeTeam)) continue;
+                    if (!teamsById.TryGetValue(g.LoserId, out var awayTeam)) continue;
+
+                    matchupRequests.Add(new MatchupRequest
+                    {
+                        TeamName = homeTeam.TeamName,
+                        OpponentName = awayTeam.TeamName,
+                        Location = g.Location,
+                        Week = g.Week
+                    });
+                }
+
+                if (matchupRequests.Count == 0) continue;
+
+                // PredictMatchups uses current TeamRecords for W/L and PPG,
+                // but power ratings in TeamRecord.PowerRating reflect the
+                // end-of-season values. For historical fidelity we override
+                // power ratings from the weekly snapshot after prediction.
+                var predictions = await _predictionService.PredictMatchups(
+                    snapshotYear, matchupRequests, token);
+
+                // Override power ratings with snapshot values so spread
+                // reflects what the model knew at snapshotWeek, not season-end.
+                for (int i = 0; i < predictions.Count; i++)
+                {
+                    var p = predictions[i];
+                    if (teamsByName.TryGetValue(p.TeamName, out var t) &&
+                        teamsByName.TryGetValue(p.OpponentName, out var opp))
+                    {
+                        var teamPR = powerByTeamId.GetValueOrDefault(t.TeamID, 0m);
+                        var oppPR = powerByTeamId.GetValueOrDefault(opp.TeamID, 0m);
+
+                        // Re-apply the power rating delta on top of the existing margin.
+                        // This matches the adjustment in GamePredictionService.CalculatePrediction.
+                        var delta = (double)(teamPR - oppPR) * 10.0;
+                        p.ExpectedMargin = Math.Round(p.ExpectedMargin + delta, 1);
+                    }
+                }
+
+                var projections = new List<Projection>(remainingGames.Count);
+
+                foreach (var g in remainingGames)
+                {
+                    if (!teamsById.TryGetValue(g.WinnerId, out var homeTeam)) continue;
+                    if (!teamsById.TryGetValue(g.LoserId,  out var awayTeam)) continue;
+
+                    var pred = predictions.FirstOrDefault(p =>
+                        p.TeamName     == homeTeam.TeamName &&
+                        p.OpponentName == awayTeam.TeamName &&
+                        p.Week         == g.Week);
+
+                    if (pred == null) continue;
+
+                    projections.Add(GamePredictionService.BuildProjection(
+                        prediction: pred,
+                        gameId:     g.Id,
+                        year:       snapshotYear,
+                        week:       snapshotWeek,
+                        homeTeamId: g.WinnerId,
+                        awayTeamId: g.LoserId));
+                }
+
+                await _uow.Projections.UpsertManyAsync(projections, token);
+                processed++;
+
+                _logger.LogInformation(
+                    "Projections backfill: {Year} week {Week} — {Count} games projected",
+                    snapshotYear, snapshotWeek, projections.Count);
+            }
+
+            return new BackfillResult(
+                $"Projections backfill complete — {processed} snapshots processed.",
+                processed,
+                effectiveStart);
+        }
+
     }
 }

@@ -2,6 +2,7 @@ using SaturdayPulse.Contracts;
 using SaturdayPulse.Contracts.Requests;
 using SaturdayPulse.Contracts.Responses;
 using SaturdayPulse.Models;
+using static Azure.Core.HttpHeader;
 
 namespace SaturdayPulse.Services
 {
@@ -218,7 +219,7 @@ namespace SaturdayPulse.Services
 
             if (throughWeek.HasValue)
             {
-                var weekly = await _uow.Lookups.GetWeeklyRankingsAsync(targetYear, throughWeek.Value, token);
+                var weekly = await _uow.WeeklyRankings.GetByYearAndWeekAsync(targetYear, throughWeek.Value, token);
 
                 if (!weekly.Any())
                     throw new KeyNotFoundException(
@@ -568,7 +569,8 @@ namespace SaturdayPulse.Services
             var fbsTeamIds = teams.Values.Where(t => t.Division == "FBS").Select(t => t.TeamID).ToHashSet();
 
             var allGames = await _uow.Game.GetByYearAsync(targetYear, token);
-            allGames = allGames.Where(g => g.Week < 16).ToList();
+            var maxWeek = allGames.Max(g => g.Week);
+            allGames = allGames.Where(g => g.Week < maxWeek).ToList();
 
             bool IsConfGame(Game g) =>
                 fbsTeamIds.Contains(g.WinnerId) && fbsTeamIds.Contains(g.LoserId) &&
@@ -757,7 +759,8 @@ namespace SaturdayPulse.Services
             var fbsTeamIds = teams.Values.Where(t => t.Division == "FBS").Select(t => t.TeamID).ToHashSet();
 
             var allGames = await _uow.Game.GetByYearAsync(year, token);
-            allGames = allGames.Where(g => g.Week < 16).ToList();
+            var maxWeek = allGames.Max(g => g.Week);
+            allGames = allGames.Where(g => g.Week < maxWeek).ToList();
 
             bool IsConfGame(Game g) =>
                 fbsTeamIds.Contains(g.WinnerId) && fbsTeamIds.Contains(g.LoserId) &&
